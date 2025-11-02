@@ -1,0 +1,23 @@
+{
+  "name": "cross-fit",
+  "version": "0.1.0",
+  "description": "End-to-end testing tool for WordPress using WordPress Playground",
+  "type": "module",
+  "main": "src/test.js",
+  "scripts": {
+    "test": "node src/test.js"
+  },
+  "keywords": [
+    "wordpress",
+    "e2e",
+    "testing",
+    "playground"
+  ],
+  "author": "",
+  "license": "GPL-3.0",
+  "dependencies": {
+    "@wp-playground/cli": "^3.0.0",
+    "playwright": "^1.40.0"
+  }
+}
+
