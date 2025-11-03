@@ -127,12 +127,11 @@ export async function testWordPressPage(page, wpInstance, path, options = {}) {
  * Useful for testing a list of URLs with standard checks
  *
  * @param {import('@playwright/test').Page} page - Playwright page object
- * @param {string} baseUrl - Base URL of WordPress instance
+ * @param {Object} wpInstance - WordPress instance with url property
  * @param {Array<string|Object>} pages - Array of page paths or objects with path and options
  * @param {Object} defaultOptions - Default options applied to all pages
  */
-export async function testWordPressPages(page, baseUrl, pages, defaultOptions = {}) {
-  const base = baseUrl.replace(/\/$/, '');
+export async function testWordPressPages(page, wpInstance, pages, defaultOptions = {}) {
   const results = [];
 
   for (const pageDef of pages) {
@@ -146,17 +145,16 @@ export async function testWordPressPages(page, baseUrl, pages, defaultOptions = 
       options = pageDef.options || {};
     }
 
-    const url = `${base}${path.startsWith('/') ? '' : '/'}${path}`;
     const mergedOptions = { ...defaultOptions, ...options };
 
-    const result = await testWordPressPage(page, url, {
+    const result = await testWordPressPage(page, wpInstance, path, {
       ...mergedOptions,
       description: `Testing: ${path}`,
     });
 
     results.push({
       path,
-      url,
+      url: normalizePath(wpInstance.url, path),
       ...result,
     });
   }
