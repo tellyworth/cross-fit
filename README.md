@@ -35,6 +35,19 @@ Or directly:
 node src/test.js
 ```
 
+### Running with Visible Browser
+
+By default, tests run in headless mode. To see the browser window during testing:
+
+```bash
+npm test:visible
+```
+
+Or:
+```bash
+HEADLESS=false node src/test.js
+```
+
 ## What It Does
 
 1. Launches WordPress Playground using `@wp-playground/cli` with automatic admin login (`--login`)

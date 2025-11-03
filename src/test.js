@@ -12,8 +12,12 @@ async function runTests() {
 
   let browser;
   try {
-    // Launch browser
-    browser = await chromium.launch({ headless: true });
+    // Launch browser - use HEADLESS=false env var to show browser window
+    const headless = process.env.HEADLESS !== 'false';
+    if (!headless) {
+      console.log('Running with visible browser (HEADLESS=false)...');
+    }
+    browser = await chromium.launch({ headless });
     const context = await browser.newContext();
     const page = await context.newPage();
 

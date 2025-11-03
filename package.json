@@ -5,7 +5,8 @@
   "type": "module",
   "main": "src/test.js",
   "scripts": {
-    "test": "node src/test.js"
+    "test": "node src/test.js",
+    "test:visible": "HEADLESS=false node src/test.js"
   },
   "keywords": [
     "wordpress",
