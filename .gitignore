@@ -51,3 +51,4 @@ tests/.wp-server-info.json
 #/wp-content/themes
 
 /node_modules
+/test-results
