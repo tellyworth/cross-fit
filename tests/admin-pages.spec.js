@@ -46,7 +46,8 @@ test.describe('WordPress Admin Pages', () => {
     // Submit the form
     await page.click('#submit');
 
-    // Wait for form submission and page reload
+    // Wait for form submission - wait for the success message or the field to be visible again
+    await expect(page.locator('#blogdescription')).toBeVisible({ timeout: 10000 });
     await page.waitForLoadState('domcontentloaded');
 
     // Wait a moment for the save to complete
