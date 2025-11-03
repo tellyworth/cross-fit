@@ -83,12 +83,55 @@ async function runTests() {
     }
 
     // Basic validation
-    console.log('\n=== Test Results ===');
+    console.log('\n=== Public Page Test Results ===');
     if (response.status() === 200 && title && !consoleErrors.length && !pageErrors.length) {
       console.log('✓ All basic checks passed');
     } else {
       console.log('✗ Some checks failed');
     }
+
+    // Test authenticated request to /wp-admin/
+    // Note: WordPress Playground is started with --login flag, so user should be auto-logged in
+    console.log('\n=== Testing Authenticated Request ===');
+
+    // Navigate directly to /wp-admin/ (should be authenticated via --login flag)
+    console.log('Navigating to /wp-admin/ (with auto-login from --login flag)...');
+    const adminResponse = await page.goto(`${wpInstance.url}/wp-admin/`);
+
+    console.log(`Admin page status: ${adminResponse.status()}`);
+
+    // Wait for admin page to load
+    await page.waitForLoadState('networkidle');
+
+    // Check if we can access admin (should see admin dashboard elements)
+    const adminTitle = await page.title();
+    console.log(`Admin page title: "${adminTitle}"`);
+
+    // Check for admin-specific elements
+    const hasAdminBody = await page.evaluate(() => {
+      return document.body.classList.contains('wp-admin') ||
+             document.body.id === 'wpadminbar' ||
+             document.querySelector('#wpadminbar') !== null ||
+             document.querySelector('#adminmenumain') !== null;
+    });
+
+    // Check if we're redirected to login (would mean authentication failed)
+    const currentUrl = page.url();
+    const isLoginPage = currentUrl.includes('/wp-login.php');
+
+    if (isLoginPage) {
+      console.log('⚠️  Redirected to login page - authentication may have failed');
+      console.log(`   Current URL: ${currentUrl}`);
+    } else if (hasAdminBody || adminTitle.includes('Dashboard') || adminTitle.includes('WordPress')) {
+      console.log('✓ Successfully accessed /wp-admin/ (authenticated)');
+    } else {
+      console.log('⚠️  Admin access unclear - admin elements not definitively detected');
+    }
+
+    // Check for errors on admin page (errors are already tracked by listeners set up earlier)
+    // Any new errors will have been added to consoleErrors and pageErrors arrays
+    const adminPageErrorCount = consoleErrors.length + pageErrors.length;
+    console.log(`✓ Admin page check complete (${adminPageErrorCount} total errors tracked so far)`);
 
   } catch (error) {
     console.error('Error during testing:', error);

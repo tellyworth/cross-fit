@@ -72,7 +72,7 @@ async function waitForServer(url, maxAttempts = 30, interval = 1000) {
  * Returns an object with methods to start/stop the instance
  */
 export async function launchWordPress() {
-  const cliProcess = spawn('npx', ['@wp-playground/cli@latest', 'server'], {
+  const cliProcess = spawn('npx', ['@wp-playground/cli@latest', 'server', '--login'], {
     stdio: ['ignore', 'pipe', 'pipe'],
     shell: true,
   });
