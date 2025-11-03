@@ -59,24 +59,6 @@ test.describe('Console Error Detection', () => {
     // Wait for the page error to be captured
     await page.waitForTimeout(500);
 
-    // Log what we captured
-    console.log('\n[Console Error Test]');
-    console.log(`Captured ${consoleErrors.length} console errors:`);
-    consoleErrors.forEach((err, i) => {
-      console.log(`  ${i + 1}. ${err.text}`);
-      if (err.location.url) {
-        console.log(`     Location: ${err.location.url}:${err.location.lineNumber}`);
-      }
-    });
-
-    console.log(`\nCaptured ${pageErrors.length} page errors:`);
-    pageErrors.forEach((err, i) => {
-      console.log(`  ${i + 1}. ${err.message}`);
-      if (err.stack) {
-        console.log(`     Stack: ${err.stack.split('\n')[0]}`);
-      }
-    });
-
     // Verify we captured the console errors
     expect(consoleErrors.length).toBeGreaterThan(0);
     expect(
@@ -99,52 +81,30 @@ test.describe('Console Error Detection', () => {
         description: 'Testing console error capture with helper',
       });
 
-      // If no errors, log that
-      if (result.consoleErrors.length === 0 && result.pageErrors.length === 0) {
-        console.log('\n[Helper Test] No errors captured (this is good if WordPress has no errors)');
-      }
+      // If no errors, that's expected - WordPress has no errors
     } catch (error) {
       // Expected if there are errors - the helper throws when allowConsoleErrors is false
-      console.log('\n[Helper Test] Helper detected errors (as expected when allowConsoleErrors is false)');
-      console.log('This confirms error detection is working!');
+      // This confirms error detection is working
     }
 
-    // Now test with errors allowed and trigger an error during navigation
-    // The helper sets up listeners before navigation, so we need to trigger
-    // the error during the helper's navigation, not before
-    // We'll use a custom page that injects an error on load
+    // Test with errors allowed and trigger an error during navigation
     await page.route('**/*', (route) => {
-      // Intercept requests and inject error script into HTML responses
       route.continue();
     });
 
-    // Use helper with allowConsoleErrors: true and inject error via evaluate after load
+    // Use helper with allowConsoleErrors: true
     const result = await testWordPressPage(page, wpInstance, '/', {
       allowConsoleErrors: true, // Allow errors for this test
       description: 'Testing helper with errors allowed',
     });
 
-    // Now inject an error after the helper's navigation completes
+    // Inject an error after the helper's navigation completes
     await page.evaluate(() => {
       console.error('HELPER TEST ERROR: Intentional error injected after helper navigation');
     });
     await page.waitForTimeout(200);
 
-    // The helper has already completed, so we need to manually check for errors again
-    // Or we can just verify the mechanism works by checking the result
-    // Log what was captured
-    if (result.consoleErrors.length > 0) {
-      console.log('\n[Helper Test - Allowed Errors] Console errors were captured during helper execution:');
-      result.consoleErrors.forEach((err, i) => {
-        console.log(`  ${i + 1}. ${err.text}`);
-      });
-    }
-
-    // Note: The error we injected after won't be in result.consoleErrors
-    // because the helper has already completed. The test verifies the helper
-    // mechanism works, but errors must occur during helper execution to be captured.
-    // This is expected behavior - errors are captured during the test, not after.
-    console.log('\n[Helper Test] Error capture mechanism verified');
+    // Verify the result structure (error will be in separate listeners if captured)
     expect(result).toBeTruthy();
   });
 });
