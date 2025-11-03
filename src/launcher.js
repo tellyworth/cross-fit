@@ -52,16 +52,33 @@ export async function launchWordPress() {
 
   let cliServer;
   try {
+    // Use a blueprint to enable WordPress debug constants
+    // Reference: https://wordpress.github.io/wordpress-playground/blueprints/steps#defineWpConfigConsts
     cliServer = await runCLI({
       command: 'server',
       php: '8.3',
       wp: 'latest',
       login: true,
+      debug: true,
+      blueprint: {
+        steps: [
+          {
+            step: 'defineWpConfigConsts',
+            consts: {
+              WP_DEBUG: true,
+              WP_DEBUG_DISPLAY: true,
+              WP_DEBUG_LOG: true,
+            },
+          },
+        ],
+      },
     });
 
     // Restore original console methods after successful launch
     console.error = originalConsoleError;
     console.warn = originalConsoleWarn;
+
+    console.log('✓ Enabled WP_DEBUG, WP_DEBUG_DISPLAY, and WP_DEBUG_LOG via blueprint');
   } catch (error) {
     // Restore original console methods on error
     console.error = originalConsoleError;
