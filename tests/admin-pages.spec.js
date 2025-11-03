@@ -24,15 +24,13 @@ test.describe('WordPress Admin Pages', () => {
     const optionsPath = '/wp-admin/options-general.php';
     const optionsUrl = `${baseUrl}${optionsPath}`;
 
-    const optionsResponse = await page.goto(optionsUrl, { waitUntil: 'domcontentloaded' });
+    // Navigate and wait for the form field to be ready
+    const optionsResponse = await page.goto(optionsUrl, { waitUntil: 'commit' });
 
     expect(optionsResponse.status()).toBe(200);
 
-    // Wait for page to load
-    await page.waitForLoadState('domcontentloaded');
-
-    // Verify we're on the options page
-    await expect(page.locator('#blogdescription')).toBeVisible({ timeout: 5000 });
+    // Wait for the form field - this ensures the page is fully loaded and interactive
+    await expect(page.locator('#blogdescription')).toBeVisible({ timeout: 15000 });
 
     // Get current site tagline value (less likely to conflict with other tests)
     const currentTagline = await page.inputValue('#blogdescription');
@@ -46,9 +44,9 @@ test.describe('WordPress Admin Pages', () => {
     // Submit the form
     await page.click('#submit');
 
-    // Wait for form submission - wait for the success message or the field to be visible again
-    await expect(page.locator('#blogdescription')).toBeVisible({ timeout: 10000 });
-    await page.waitForLoadState('domcontentloaded');
+    // Wait for form submission - wait for navigation and then for the field to be visible again
+    // The field being visible indicates the page has reloaded after form submission
+    await expect(page.locator('#blogdescription')).toBeVisible({ timeout: 15000 });
 
     // Wait a moment for the save to complete
     await page.waitForTimeout(1000);

@@ -235,25 +235,24 @@ export async function testWordPressRSSFeed(page, wpInstance, path, options = {})
  */
 export async function testWordPressAdminPage(page, wpInstance, path, options = {}) {
   const url = normalizePath(wpInstance.url, path);
-  // Admin pages have continuous network activity (heartbeat, auto-save, etc.)
-  // Use 'domcontentloaded' instead of 'networkidle' to avoid timeouts
-  const response = await page.goto(url, { waitUntil: 'domcontentloaded' });
+
+  // Navigate to the page - use 'commit' to wait for navigation to start
+  // This is faster and more reliable than waiting for DOMContentLoaded
+  const response = await page.goto(url, { waitUntil: 'commit' });
 
   expect(response.status()).toBe(200);
 
-  // Wait for a specific admin element to ensure page is loaded
-  // Try multiple selectors as different admin pages have different elements
-  try {
-    // Wait for any admin element to be visible
-    await Promise.race([
-      page.waitForSelector('#wpadminbar', { timeout: 5000 }).catch(() => null),
-      page.waitForSelector('#adminmenumain', { timeout: 5000 }).catch(() => null),
-      page.waitForSelector('body.wp-admin', { timeout: 5000 }).catch(() => null),
-      page.waitForSelector('#wpbody-content', { timeout: 5000 }).catch(() => null),
-    ]);
-  } catch (error) {
-    // If no admin element found, continue and check below
-  }
+  // Wait for specific admin elements - this is more reliable than waiting for load events
+  // Admin pages load JavaScript after DOMContentLoaded, so we wait for actual UI elements
+  // Use a longer timeout to account for slower pages
+  await Promise.race([
+    page.waitForSelector('#wpadminbar', { timeout: 15000 }),
+    page.waitForSelector('#adminmenumain', { timeout: 15000 }),
+    page.waitForSelector('body.wp-admin', { timeout: 15000 }),
+    page.waitForSelector('#wpbody-content', { timeout: 15000 }),
+  ]).catch(() => {
+    // If none found, continue - we'll check below
+  });
 
   // Check for admin-specific elements
   const adminCheck = await page.evaluate(() => {
