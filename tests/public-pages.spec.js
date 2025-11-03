@@ -7,14 +7,14 @@ import {
 test.describe('WordPress Public Pages', () => {
 
   test('should load homepage without errors', async ({ page, wpInstance }) => {
-    await testWordPressPage(page, wpInstance.url, {
+    await testWordPressPage(page, wpInstance, '/', {
       description: 'Test homepage',
     });
   });
 
   test('should load multiple public pages without errors', async ({ page, wpInstance }) => {
     // Test multiple pages with a single call - easy to extend
-    await testWordPressPages(page, wpInstance.url, [
+    await testWordPressPages(page, wpInstance, [
       '/',
       '/feed/',
       // Add more pages here easily:
@@ -26,7 +26,7 @@ test.describe('WordPress Public Pages', () => {
 
   test('should test pages with custom options', async ({ page, wpInstance }) => {
     // Test pages with custom validation options
-    await testWordPressPages(page, wpInstance.url, [
+    await testWordPressPages(page, wpInstance, [
       {
         path: '/',
         options: {

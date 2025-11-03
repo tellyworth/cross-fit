@@ -6,25 +6,23 @@ import {
 test.describe('WordPress Admin Pages', () => {
 
   test('should access authenticated admin dashboard', async ({ page, wpInstance }) => {
-    const baseUrl = wpInstance.url.replace(/\/$/, '');
-    await testWordPressAdminPage(page, `${baseUrl}/wp-admin/`);
+    await testWordPressAdminPage(page, wpInstance, '/wp-admin/');
   });
 
   test('should access multiple admin pages', async ({ page, wpInstance }) => {
-    const baseUrl = wpInstance.url.replace(/\/$/, '');
-
     // Test multiple admin pages
-    await testWordPressAdminPage(page, `${baseUrl}/wp-admin/`);
-    await testWordPressAdminPage(page, `${baseUrl}/wp-admin/options-general.php`);
+    await testWordPressAdminPage(page, wpInstance, '/wp-admin/');
+    await testWordPressAdminPage(page, wpInstance, '/wp-admin/options-general.php');
     // Add more admin pages easily:
-    // await testWordPressAdminPage(page, `${baseUrl}/wp-admin/edit.php`);
-    // await testWordPressAdminPage(page, `${baseUrl}/wp-admin/upload.php`);
+    // await testWordPressAdminPage(page, wpInstance, '/wp-admin/edit.php');
+    // await testWordPressAdminPage(page, wpInstance, '/wp-admin/upload.php');
   });
 
   test('should successfully submit POST request to change site options', async ({ page, wpInstance }) => {
     // Navigate to General Settings page
-    const optionsBaseUrl = wpInstance.url.replace(/\/$/, '');
-    const optionsUrl = `${optionsBaseUrl}/wp-admin/options-general.php`;
+    const baseUrl = wpInstance.url.replace(/\/$/, '');
+    const optionsPath = '/wp-admin/options-general.php';
+    const optionsUrl = `${baseUrl}${optionsPath}`;
 
     const optionsResponse = await page.goto(optionsUrl, { waitUntil: 'domcontentloaded' });
 

@@ -6,14 +6,12 @@ import {
 test.describe('WordPress RSS Feeds', () => {
 
   test('should validate RSS feed structure', async ({ page, wpInstance }) => {
-    const feedBaseUrl = wpInstance.url.replace(/\/$/, '');
-    await testWordPressRSSFeed(page, `${feedBaseUrl}/feed/`);
+    await testWordPressRSSFeed(page, wpInstance, '/feed/');
   });
 
   // Add more RSS feed tests here:
   // test('should validate comments RSS feed', async ({ page, wpInstance }) => {
-  //   const feedBaseUrl = wpInstance.url.replace(/\/$/, '');
-  //   await testWordPressRSSFeed(page, `${feedBaseUrl}/comments/feed/`);
+  //   await testWordPressRSSFeed(page, wpInstance, '/comments/feed/');
   // });
 });
 

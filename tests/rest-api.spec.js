@@ -7,8 +7,7 @@ import {
 test.describe('WordPress REST API', () => {
 
   test('should access REST API base endpoint', async ({ page, wpInstance }) => {
-    const baseUrl = wpInstance.url.replace(/\/$/, '');
-    const result = await testWordPressRESTAPI(page, `${baseUrl}/wp-json/`, {
+    const result = await testWordPressRESTAPI(page, wpInstance, '/wp-json/', {
       expectedStatus: 200,
     });
 
@@ -18,8 +17,7 @@ test.describe('WordPress REST API', () => {
   });
 
   test('should access posts endpoint', async ({ page, wpInstance }) => {
-    const baseUrl = wpInstance.url.replace(/\/$/, '');
-    const result = await testWordPressRESTAPI(page, `${baseUrl}/wp-json/wp/v2/posts`, {
+    const result = await testWordPressRESTAPI(page, wpInstance, '/wp-json/wp/v2/posts', {
       expectedStatus: 200,
       validateResponse: (data) => {
         // Posts endpoint should return an array
@@ -29,16 +27,14 @@ test.describe('WordPress REST API', () => {
   });
 
   test('should access single post endpoint', async ({ page, wpInstance }) => {
-    const baseUrl = wpInstance.url.replace(/\/$/, '');
-
     // First get posts to find a valid post ID
-    const postsResult = await testWordPressRESTAPI(page, `${baseUrl}/wp-json/wp/v2/posts`, {
+    const postsResult = await testWordPressRESTAPI(page, wpInstance, '/wp-json/wp/v2/posts', {
       expectedStatus: 200,
     });
 
     if (Array.isArray(postsResult.data) && postsResult.data.length > 0) {
       const postId = postsResult.data[0].id;
-      const result = await testWordPressRESTAPI(page, `${baseUrl}/wp-json/wp/v2/posts/${postId}`, {
+      const result = await testWordPressRESTAPI(page, wpInstance, `/wp-json/wp/v2/posts/${postId}`, {
         expectedStatus: 200,
         validateResponse: (data) => {
           // Single post should be an object with id and title
@@ -49,17 +45,16 @@ test.describe('WordPress REST API', () => {
       });
     } else {
       // If no posts, test the endpoint anyway (may return 404 or empty)
-      const result = await testWordPressRESTAPI(page, `${baseUrl}/wp-json/wp/v2/posts/1`, {
+      const result = await testWordPressRESTAPI(page, wpInstance, '/wp-json/wp/v2/posts/1', {
         expectedStatus: 200, // May be 404 if no posts, but we'll test it
       });
     }
   });
 
   test('should test multiple REST API endpoints', async ({ page, wpInstance }) => {
-    const baseUrl = wpInstance.url.replace(/\/$/, '');
-
     // Test multiple endpoints with a single call
-    await testWordPressRESTEndpoints(page, baseUrl, [
+    // Paths are relative to /wp-json/wp/v2
+    await testWordPressRESTEndpoints(page, wpInstance, [
       '/posts',
       '/pages',
       '/categories',
@@ -71,12 +66,10 @@ test.describe('WordPress REST API', () => {
   });
 
   test('should handle POST requests to REST API', async ({ page, wpInstance }) => {
-    const baseUrl = wpInstance.url.replace(/\/$/, '');
-
     // Note: This requires authentication. For now, we'll test that the endpoint exists
     // In a more complete implementation, we'd add auth headers
     // Without auth, WordPress may return 200 (with error), 401 (unauthorized), or 403 (forbidden)
-    const result = await testWordPressRESTAPI(page, `${baseUrl}/wp-json/wp/v2/posts`, {
+    const result = await testWordPressRESTAPI(page, wpInstance, '/wp-json/wp/v2/posts', {
       method: 'POST',
       body: {
         title: 'Test Post',

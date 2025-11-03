@@ -6,24 +6,46 @@ import { expect } from '@playwright/test';
  */
 
 /**
+ * Normalize URL - handles full URLs or relative paths
+ * @param {string} baseUrl - Base URL from wpInstance
+ * @param {string} path - Relative path (e.g., '/wp-admin/') or full URL
+ * @returns {string} Full URL
+ */
+function normalizePath(baseUrl, path) {
+  // If path is already a full URL, return it
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    return path;
+  }
+
+  // Normalize base URL (remove trailing slash)
+  const base = baseUrl.replace(/\/$/, '');
+
+  // Ensure path starts with /
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+
+  return `${base}${normalizedPath}`;
+}
+
+/**
  * Test a WordPress page URL with standard checks:
  * - HTTP response status
  * - JavaScript console errors
  * - Page errors
  * - Optional title/body class validation
  *
- * @param {Object} params
- * @param {import('@playwright/test').Page} params.page - Playwright page object
- * @param {string} params.url - Full URL to test
- * @param {Object} params.options - Optional test options
- * @param {number} params.options.expectedStatus - Expected HTTP status (default: 200)
- * @param {string|RegExp} params.options.expectedTitle - Expected page title (optional)
- * @param {string|RegExp} params.options.expectedBodyClass - Expected body class (optional)
- * @param {boolean} params.options.allowConsoleErrors - Allow console errors (default: false)
- * @param {boolean} params.options.allowPageErrors - Allow page errors (default: false)
- * @param {string} params.options.description - Description for test.step (optional)
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @param {Object} wpInstance - WordPress instance with url property
+ * @param {string} path - Relative path (e.g., '/wp-admin/') or full URL
+ * @param {Object} options - Optional test options
+ * @param {number} options.expectedStatus - Expected HTTP status (default: 200)
+ * @param {string|RegExp} options.expectedTitle - Expected page title (optional)
+ * @param {string|RegExp} options.expectedBodyClass - Expected body class (optional)
+ * @param {boolean} options.allowConsoleErrors - Allow console errors (default: false)
+ * @param {boolean} options.allowPageErrors - Allow page errors (default: false)
+ * @param {string} options.description - Description for test.step (optional)
  */
-export async function testWordPressPage(page, url, options = {}) {
+export async function testWordPressPage(page, wpInstance, path, options = {}) {
+  const url = normalizePath(wpInstance.url, path);
   const {
     expectedStatus = 200,
     expectedTitle = null,
@@ -146,10 +168,12 @@ export async function testWordPressPages(page, baseUrl, pages, defaultOptions = 
  * Test WordPress RSS feed with XML validation
  *
  * @param {import('@playwright/test').Page} page - Playwright page object
- * @param {string} feedUrl - Full URL to RSS feed
+ * @param {Object} wpInstance - WordPress instance with url property
+ * @param {string} path - Relative path to RSS feed (e.g., '/feed/')
  * @param {Object} options - Optional test options
  */
-export async function testWordPressRSSFeed(page, feedUrl, options = {}) {
+export async function testWordPressRSSFeed(page, wpInstance, path, options = {}) {
+  const feedUrl = normalizePath(wpInstance.url, path);
   const response = await page.goto(feedUrl, { waitUntil: 'networkidle' });
 
   expect(response.status()).toBe(200);
@@ -207,10 +231,12 @@ export async function testWordPressRSSFeed(page, feedUrl, options = {}) {
  * Test authenticated WordPress admin page
  *
  * @param {import('@playwright/test').Page} page - Playwright page object
- * @param {string} url - Full URL to admin page
+ * @param {Object} wpInstance - WordPress instance with url property
+ * @param {string} path - Relative path to admin page (e.g., '/wp-admin/')
  * @param {Object} options - Optional test options
  */
-export async function testWordPressAdminPage(page, url, options = {}) {
+export async function testWordPressAdminPage(page, wpInstance, path, options = {}) {
+  const url = normalizePath(wpInstance.url, path);
   // Admin pages have continuous network activity (heartbeat, auto-save, etc.)
   // Use 'domcontentloaded' instead of 'networkidle' to avoid timeouts
   const response = await page.goto(url, { waitUntil: 'domcontentloaded' });
@@ -264,7 +290,8 @@ export async function testWordPressAdminPage(page, url, options = {}) {
  * Test WordPress REST API endpoint
  *
  * @param {import('@playwright/test').Page} page - Playwright page object
- * @param {string} url - Full URL to REST API endpoint
+ * @param {Object} wpInstance - WordPress instance with url property
+ * @param {string} path - Relative path to REST API endpoint (e.g., '/wp-json/wp/v2/posts')
  * @param {Object} options - Optional test options
  * @param {string} options.method - HTTP method (default: 'GET')
  * @param {Object} options.headers - Additional headers
@@ -272,7 +299,8 @@ export async function testWordPressAdminPage(page, url, options = {}) {
  * @param {number} options.expectedStatus - Expected HTTP status (default: 200)
  * @param {Function} options.validateResponse - Custom validation function
  */
-export async function testWordPressRESTAPI(page, url, options = {}) {
+export async function testWordPressRESTAPI(page, wpInstance, path, options = {}) {
+  const url = normalizePath(wpInstance.url, path);
   const {
     method = 'GET',
     headers = {},
@@ -350,12 +378,10 @@ export async function testWordPressRESTAPI(page, url, options = {}) {
  * Test WordPress REST API endpoints in bulk
  *
  * @param {import('@playwright/test').Page} page - Playwright page object
- * @param {string} baseUrl - Base URL of WordPress instance
- * @param {Array<string|Object>} endpoints - Array of endpoint paths or objects with path and options
+ * @param {Object} wpInstance - WordPress instance with url property
+ * @param {Array<string|Object>} endpoints - Array of endpoint paths (relative to /wp-json/wp/v2) or objects with path and options
  */
-export async function testWordPressRESTEndpoints(page, baseUrl, endpoints) {
-  const base = baseUrl.replace(/\/$/, '');
-  const apiBase = `${base}/wp-json/wp/v2`;
+export async function testWordPressRESTEndpoints(page, wpInstance, endpoints) {
   const results = [];
 
   for (const endpointDef of endpoints) {
@@ -369,15 +395,21 @@ export async function testWordPressRESTEndpoints(page, baseUrl, endpoints) {
       options = endpointDef.options || {};
     }
 
-    // Ensure path starts with /
-    const fullPath = path.startsWith('/') ? path : `/${path}`;
-    const url = `${apiBase}${fullPath}`;
+    // Ensure path starts with /wp-json/wp/v2
+    // If path doesn't start with /wp-json/, assume it's relative to /wp-json/wp/v2
+    let apiPath;
+    if (path.startsWith('/wp-json/')) {
+      apiPath = path;
+    } else {
+      const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+      apiPath = `/wp-json/wp/v2${normalizedPath}`;
+    }
 
-    const result = await testWordPressRESTAPI(page, url, options);
+    const result = await testWordPressRESTAPI(page, wpInstance, apiPath, options);
 
     results.push({
-      path: fullPath,
-      url,
+      path: apiPath,
+      url: normalizePath(wpInstance.url, apiPath),
       ...result,
     });
   }
