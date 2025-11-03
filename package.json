@@ -5,8 +5,10 @@
   "type": "module",
   "main": "src/test.js",
   "scripts": {
-    "test": "node src/test.js",
-    "test:visible": "HEADLESS=false node src/test.js"
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "test:headed": "HEADLESS=false playwright test",
+    "test:old": "node src/test.js"
   },
   "keywords": [
     "wordpress",
@@ -17,8 +19,10 @@
   "author": "",
   "license": "GPL-3.0",
   "dependencies": {
-    "@wp-playground/cli": "^3.0.0",
-    "playwright": "^1.40.0"
+    "@wp-playground/cli": "^3.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.40.0"
   }
 }
 

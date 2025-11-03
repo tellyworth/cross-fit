@@ -25,27 +25,29 @@ npx playwright install chromium
 
 ## Usage
 
-Run the minimal test:
+Run all tests:
 ```bash
 npm test
 ```
 
-Or directly:
-```bash
-node src/test.js
-```
+### Test Commands
+
+- `npm test` - Run all tests in headless mode
+- `npm run test:ui` - Run tests with Playwright UI mode (interactive)
+- `npm run test:headed` - Run tests with visible browser window
+- `npm run test:old` - Run the old script-based test (for reference)
 
 ### Running with Visible Browser
 
 By default, tests run in headless mode. To see the browser window during testing:
 
 ```bash
-npm test:visible
+npm run test:headed
 ```
 
-Or:
+Or use the UI mode for interactive debugging:
 ```bash
-HEADLESS=false node src/test.js
+npm run test:ui
 ```
 
 ## What It Does
@@ -72,20 +74,30 @@ HEADLESS=false node src/test.js
 - ✅ Validate HTTP response status codes
 - ✅ Verify page content (titles, classes, structure)
 
+## Test Structure
+
+Tests are organized using Playwright Test framework:
+
+- `tests/wp-fixtures.js` - Custom fixtures providing WordPress instance for each test
+- `tests/wordpress.spec.js` - Test suite with all test cases:
+  - Public homepage test
+  - Admin dashboard authentication test
+  - RSS feed validation test
+  - POST request test (changing site options)
+
 ## Current Limitations
 
 This is an MVP. Currently it:
 - Does not detect PHP errors directly (only JS/console errors)
 - Does not test additional public pages (like `/about/`)
-- Does not use a formal test framework
 - Limited error reporting (basic console output only)
 
 ## Next Steps
 
-- Add tests for additional pages (`/about/`, `/rss.xml`)
+- Add tests for additional pages (`/about/`, custom pages)
 - Implement PHP error detection
-- Improve error reporting and test output
-- Consider integrating a test framework (Jest, Mocha, etc.)
+- Add more sophisticated test scenarios
 - Add support for testing plugins and themes
+- Improve test reporting and output
 
 
