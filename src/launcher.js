@@ -78,6 +78,25 @@ export async function launchWordPress() {
 
   console.log(`✓ Server is ready at ${serverUrl}`);
 
+  // Listen for errors from the HTTP server
+  // The server property is a Node.js HTTP Server which extends EventEmitter
+  // It emits 'error' events when server errors occur (port binding, etc.)
+  // It emits 'clientError' events for client connection errors
+  if (cliServer.server && typeof cliServer.server.on === 'function') {
+    cliServer.server.on('error', (error) => {
+      console.error('[WordPress Playground Server Error]', error);
+    });
+
+    cliServer.server.on('clientError', (error, socket) => {
+      console.error('[WordPress Playground Client Error]', error);
+    });
+  }
+
+  // Note: The playground RemoteAPI doesn't expose the worker thread directly
+  // Worker thread errors (PHP execution errors, etc.) are handled internally
+  // by Playground and don't surface through the RemoteAPI interface
+  // We rely on PHP error detection in rendered page content (WP_DEBUG_DISPLAY)
+
   return {
     url: serverUrl,
     server: cliServer,
