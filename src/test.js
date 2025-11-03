@@ -135,6 +135,67 @@ async function runTests() {
     const adminPageErrorCount = consoleErrors.length + pageErrors.length;
     console.log(`✓ Admin page check complete (${adminPageErrorCount} total errors tracked so far)`);
 
+    // Test RSS feed
+    console.log('\n=== Testing RSS Feed ===');
+
+    // Navigate to RSS feed
+    const feedBaseUrl = wpInstance.url.replace(/\/$/, '');
+    const feedUrl = `${feedBaseUrl}/feed/`;
+    console.log(`Navigating to RSS feed: ${feedUrl}`);
+
+    const feedResponse = await page.goto(feedUrl, { waitUntil: 'networkidle' });
+    console.log(`Feed response status: ${feedResponse.status()}`);
+
+    // Get response content type
+    const contentType = feedResponse.headers()['content-type'] || '';
+    console.log(`Content-Type: ${contentType}`);
+
+    // Validate RSS feed using browser's DOMParser
+    const feedValidation = await page.evaluate(() => {
+      const parser = new DOMParser();
+      const xmlText = document.body.textContent || document.documentElement.textContent;
+      const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
+
+      // Check for parse errors
+      const parseError = xmlDoc.querySelector('parsererror');
+      if (parseError) {
+        return { valid: false, error: 'XML parse error' };
+      }
+
+      // Check for RSS structure
+      const rss = xmlDoc.querySelector('rss');
+      const channel = xmlDoc.querySelector('channel');
+      const title = xmlDoc.querySelector('channel > title');
+      const description = xmlDoc.querySelector('channel > description');
+
+      return {
+        valid: !!(rss && channel && title && description),
+        hasRss: !!rss,
+        hasChannel: !!channel,
+        hasTitle: !!title,
+        hasDescription: !!description,
+        titleText: title ? title.textContent : null,
+      };
+    });
+
+    if (feedResponse.status() === 200 && feedValidation.valid) {
+      console.log('✓ RSS feed is valid XML');
+      console.log(`  Channel title: "${feedValidation.titleText}"`);
+    } else {
+      console.log(`⚠️  RSS feed validation issues:`);
+      console.log(`  Valid XML: ${feedValidation.valid}`);
+      console.log(`  Has RSS element: ${feedValidation.hasRss}`);
+      console.log(`  Has channel: ${feedValidation.hasChannel}`);
+      console.log(`  Has title: ${feedValidation.hasTitle}`);
+      console.log(`  Has description: ${feedValidation.hasDescription}`);
+    }
+
+    if (contentType.includes('xml') || contentType.includes('rss') || contentType.includes('atom')) {
+      console.log('✓ Content-Type indicates XML/RSS');
+    } else {
+      console.log(`⚠️  Unexpected Content-Type: ${contentType}`);
+    }
+
     // Test POST request - change site option
     console.log('\n=== Testing POST Request ===');
 
