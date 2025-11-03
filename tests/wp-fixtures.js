@@ -1,24 +1,39 @@
 import { test as base } from '@playwright/test';
-import { launchWordPress } from '../src/launcher.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /**
  * WordPress Playground fixture for Playwright Test
- * Provides a shared WordPress instance for all tests (worker-scoped)
+ * Provides access to the shared WordPress instance launched in global setup
  */
 export const test = base.extend({
-  wpInstance: [
-    async ({}, use) => {
-      // Launch WordPress instance once for all tests
-      const wpInstance = await launchWordPress();
+  wpInstance: async ({}, use) => {
+    // Read the WordPress server info from global setup
+    const serverInfoPath = path.join(__dirname, '.wp-server-info.json');
 
-      // Provide to all tests
-      await use(wpInstance);
+    if (!fs.existsSync(serverInfoPath)) {
+      throw new Error('WordPress server info not found. Ensure global setup has run.');
+    }
 
-      // Cleanup after all tests complete
-      await wpInstance.stop();
-    },
-    { scope: 'worker' }, // Share across all tests in the worker
-  ],
+    const serverInfo = JSON.parse(fs.readFileSync(serverInfoPath, 'utf-8'));
+
+    // Create a minimal wpInstance object that provides the URL
+    // The actual server is managed by global setup/teardown
+    const wpInstance = {
+      url: serverInfo.url,
+      // Stop is a no-op since global teardown handles cleanup
+      stop: async () => {
+        // No-op - cleanup is handled in global teardown
+      },
+    };
+
+    // Provide to test
+    await use(wpInstance);
+  },
 });
 
 export { expect } from '@playwright/test';

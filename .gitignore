@@ -32,6 +32,9 @@ wp-config.php
 # Log files
 *.log
 
+# Playwright test artifacts
+tests/.wp-server-info.json
+
 # htaccess
 /.htaccess
 
