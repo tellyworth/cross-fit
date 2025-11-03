@@ -260,3 +260,128 @@ export async function testWordPressAdminPage(page, url, options = {}) {
   };
 }
 
+/**
+ * Test WordPress REST API endpoint
+ *
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @param {string} url - Full URL to REST API endpoint
+ * @param {Object} options - Optional test options
+ * @param {string} options.method - HTTP method (default: 'GET')
+ * @param {Object} options.headers - Additional headers
+ * @param {Object} options.body - Request body (for POST/PUT)
+ * @param {number} options.expectedStatus - Expected HTTP status (default: 200)
+ * @param {Function} options.validateResponse - Custom validation function
+ */
+export async function testWordPressRESTAPI(page, url, options = {}) {
+  const {
+    method = 'GET',
+    headers = {},
+    body = null,
+    expectedStatus = 200,
+    validateResponse = null,
+  } = options;
+
+  // Make API request using Playwright's APIRequestContext
+  // page.request is an APIRequestContext that provides get(), post(), etc.
+  let response;
+
+  const requestHeaders = {
+    'Content-Type': 'application/json',
+    ...headers,
+  };
+
+  switch (method.toUpperCase()) {
+    case 'GET':
+      response = await page.request.get(url, { headers: requestHeaders });
+      break;
+    case 'POST':
+      response = await page.request.post(url, {
+        headers: requestHeaders,
+        data: body,
+      });
+      break;
+    case 'PUT':
+      response = await page.request.put(url, {
+        headers: requestHeaders,
+        data: body,
+      });
+      break;
+    case 'DELETE':
+      response = await page.request.delete(url, { headers: requestHeaders });
+      break;
+    default:
+      response = await page.request.get(url, { headers: requestHeaders });
+  }
+
+  expect(response.status()).toBe(expectedStatus);
+
+  // Parse JSON response
+  const contentType = response.headers()['content-type'] || '';
+  let responseData = null;
+
+  if (contentType.includes('json')) {
+    responseData = await response.json();
+  } else {
+    const text = await response.text();
+    responseData = text;
+  }
+
+  // Custom validation if provided
+  if (validateResponse) {
+    await validateResponse(responseData, response);
+  }
+
+  // Basic JSON validation if response is JSON
+  if (contentType.includes('json') && method.toUpperCase() === 'GET') {
+    expect(responseData).toBeTruthy();
+    // WordPress REST API typically returns an object or array
+    expect(typeof responseData === 'object' || Array.isArray(responseData)).toBe(true);
+  }
+
+  return {
+    response,
+    data: responseData,
+    status: response.status(),
+    contentType,
+  };
+}
+
+/**
+ * Test WordPress REST API endpoints in bulk
+ *
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @param {string} baseUrl - Base URL of WordPress instance
+ * @param {Array<string|Object>} endpoints - Array of endpoint paths or objects with path and options
+ */
+export async function testWordPressRESTEndpoints(page, baseUrl, endpoints) {
+  const base = baseUrl.replace(/\/$/, '');
+  const apiBase = `${base}/wp-json/wp/v2`;
+  const results = [];
+
+  for (const endpointDef of endpoints) {
+    let path, options;
+
+    if (typeof endpointDef === 'string') {
+      path = endpointDef;
+      options = {};
+    } else {
+      path = endpointDef.path;
+      options = endpointDef.options || {};
+    }
+
+    // Ensure path starts with /
+    const fullPath = path.startsWith('/') ? path : `/${path}`;
+    const url = `${apiBase}${fullPath}`;
+
+    const result = await testWordPressRESTAPI(page, url, options);
+
+    results.push({
+      path: fullPath,
+      url,
+      ...result,
+    });
+  }
+
+  return results;
+}
+
