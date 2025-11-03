@@ -1,30 +1,28 @@
 import { test as base } from '@playwright/test';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 /**
  * WordPress Playground fixture for Playwright Test
  * Provides access to the shared WordPress instance launched in global setup
+ *
+ * Uses environment variable (WP_PLAYGROUND_URL) set by global setup
+ * This is Playwright's recommended way to share setup data across workers
  */
 export const test = base.extend({
   wpInstance: async ({}, use) => {
-    // Read the WordPress server info from global setup
-    const serverInfoPath = path.join(__dirname, '.wp-server-info.json');
+    // Read the WordPress URL from environment variable set by global setup
+    const wpUrl = process.env.WP_PLAYGROUND_URL;
 
-    if (!fs.existsSync(serverInfoPath)) {
-      throw new Error('WordPress server info not found. Ensure global setup has run.');
+    if (!wpUrl) {
+      throw new Error(
+        'WordPress URL not found in environment. ' +
+        'Ensure global setup has run and set WP_PLAYGROUND_URL.'
+      );
     }
-
-    const serverInfo = JSON.parse(fs.readFileSync(serverInfoPath, 'utf-8'));
 
     // Create a minimal wpInstance object that provides the URL
     // The actual server is managed by global setup/teardown
     const wpInstance = {
-      url: serverInfo.url,
+      url: wpUrl,
       // Stop is a no-op since global teardown handles cleanup
       stop: async () => {
         // No-op - cleanup is handled in global teardown
