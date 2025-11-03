@@ -16,30 +16,6 @@ async function globalTeardown(wpInstance) {
     console.log('[Global Teardown] WordPress instance not found or already stopped');
   }
 
-  // Display captured console errors from WordPress Playground
-  if (instance) {
-    if (instance.errors && instance.errors.length > 0) {
-      console.log('\n[WordPress Playground Console Errors]');
-      instance.errors.forEach(error => {
-        console.error(`  [${error.timestamp}] ${error.type}: ${error.message}`);
-        if (error.stack) {
-          console.error(`    ${error.stack.split('\n').join('\n    ')}`);
-        }
-      });
-    }
-
-    if (instance.logs && instance.logs.length > 0) {
-      console.log('\n[WordPress Playground Console Warnings]');
-      instance.logs.forEach(log => {
-        console.warn(`  [${log.timestamp}] ${log.type}: ${log.message}`);
-      });
-    }
-
-    if ((!instance.logs || instance.logs.length === 0) &&
-        (!instance.errors || instance.errors.length === 0)) {
-      console.log('\n[WordPress Playground] No console errors or warnings captured');
-    }
-  }
 
   // Clean up environment variable
   delete process.env.WP_PLAYGROUND_URL;
