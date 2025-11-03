@@ -56,10 +56,19 @@ export async function launchWordPress() {
     url: serverUrl,
     server: cliServer,
     stop: async () => {
-      if (cliServer && typeof cliServer.stop === 'function') {
-        await cliServer.stop();
-      } else if (cliServer && typeof cliServer.close === 'function') {
-        await cliServer.close();
+      try {
+        // Try to stop the server - it may have a stop method or need cleanup via server property
+        if (cliServer && typeof cliServer.stop === 'function') {
+          await cliServer.stop();
+        } else if (cliServer && typeof cliServer.close === 'function') {
+          await cliServer.close();
+        } else if (cliServer.server && typeof cliServer.server.close === 'function') {
+          await cliServer.server.close();
+        } else if (cliServer.server && typeof cliServer.server.stop === 'function') {
+          await cliServer.server.stop();
+        }
+      } catch (error) {
+        console.error('Error stopping server:', error);
       }
     },
   };

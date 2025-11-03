@@ -274,6 +274,10 @@ async function runTests() {
     console.log('\nStopping WordPress Playground...');
     await wpInstance.stop();
     console.log('Done!');
+
+    // Explicitly exit to ensure process terminates
+    // (some server resources might keep the process alive)
+    process.exit(0);
   }
 }
 
