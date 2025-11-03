@@ -96,7 +96,9 @@ async function runTests() {
 
     // Navigate directly to /wp-admin/ (should be authenticated via --login flag)
     console.log('Navigating to /wp-admin/ (with auto-login from --login flag)...');
-    const adminResponse = await page.goto(`${wpInstance.url}/wp-admin/`);
+    // Remove trailing slash from base URL if present, then add path
+    const baseUrl = wpInstance.url.replace(/\/$/, '');
+    const adminResponse = await page.goto(`${baseUrl}/wp-admin/`);
 
     console.log(`Admin page status: ${adminResponse.status()}`);
 
@@ -132,6 +134,69 @@ async function runTests() {
     // Any new errors will have been added to consoleErrors and pageErrors arrays
     const adminPageErrorCount = consoleErrors.length + pageErrors.length;
     console.log(`✓ Admin page check complete (${adminPageErrorCount} total errors tracked so far)`);
+
+    // Test POST request - change site option
+    console.log('\n=== Testing POST Request ===');
+
+    // Navigate to General Settings page
+    console.log('Navigating to General Settings (options-general.php)...');
+    // Remove trailing slash from base URL if present, then add path (reuse baseUrl from above)
+    const optionsBaseUrl = wpInstance.url.replace(/\/$/, '');
+    const optionsUrl = `${optionsBaseUrl}/wp-admin/options-general.php`;
+    console.log(`Full options URL: ${optionsUrl}`);
+
+    const optionsResponse = await page.goto(optionsUrl, { waitUntil: 'networkidle' });
+
+    const optionsPageUrl = page.url();
+    console.log(`Response status: ${optionsResponse.status()}`);
+    console.log(`Final URL after navigation: ${optionsPageUrl}`);
+
+    if (optionsResponse.status() === 404) {
+      throw new Error(`Options page returned 404. Tried: ${optionsUrl}, ended up at: ${optionsPageUrl}`);
+    }
+
+    // Verify we're on the options page by checking for the form
+    try {
+      await page.waitForSelector('#blogname', { timeout: 5000 });
+      console.log('✓ Found options form - on the correct page');
+    } catch (error) {
+      throw new Error(`Could not find options form on page. Current URL: ${optionsPageUrl}`);
+    }
+
+    // Get current site title value
+    const currentTitle = await page.inputValue('#blogname');
+    console.log(`Current site title: "${currentTitle}"`);
+
+    // Generate a new test title
+    const newTitle = `Test Site ${Date.now()}`;
+    console.log(`Changing site title to: "${newTitle}"`);
+
+    // Fill in the new title
+    await page.fill('#blogname', newTitle);
+
+    // Submit the form
+    console.log('Submitting form...');
+    await page.click('#submit');
+
+    // Wait for form submission and page reload
+    await page.waitForLoadState('networkidle');
+
+    // Wait a moment for the save to complete
+    await page.waitForTimeout(1000);
+
+    // Check if the change was saved by reading the value again
+    const savedTitle = await page.inputValue('#blogname');
+    console.log(`Saved site title: "${savedTitle}"`);
+
+    if (savedTitle === newTitle) {
+      console.log('✓ POST request successful - site option changed in database');
+    } else {
+      console.log(`⚠️  POST request may have failed - expected "${newTitle}" but got "${savedTitle}"`);
+    }
+
+    // Check for any errors after POST
+    const postErrorCount = consoleErrors.length + pageErrors.length;
+    console.log(`✓ POST request test complete (${postErrorCount} total errors tracked so far)`);
 
   } catch (error) {
     console.error('Error during testing:', error);
