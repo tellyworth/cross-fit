@@ -3,12 +3,10 @@
   "version": "0.1.0",
   "description": "End-to-end testing tool for WordPress using WordPress Playground",
   "type": "module",
-  "main": "src/test.js",
   "scripts": {
     "test": "playwright test",
     "test:ui": "playwright test --ui",
-    "test:headed": "HEADLESS=false playwright test",
-    "test:old": "node src/test.js"
+    "test:headed": "HEADLESS=false playwright test"
   },
   "keywords": [
     "wordpress",
