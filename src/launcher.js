@@ -82,6 +82,8 @@ export async function launchWordPress() {
   // The server property is a Node.js HTTP Server which extends EventEmitter
   // It emits 'error' events when server errors occur (port binding, etc.)
   // It emits 'clientError' events for client connection errors
+  // Note: We log all errors including ECONNRESET/EPIPE to see all Playground output
+  // ECONNRESET is common during tests but visible output helps with debugging
   if (cliServer.server && typeof cliServer.server.on === 'function') {
     cliServer.server.on('error', (error) => {
       console.error('[WordPress Playground Server Error]', error);
