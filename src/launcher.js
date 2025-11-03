@@ -35,6 +35,25 @@ async function isUrlReady(url, timeout = 5000) {
 }
 
 /**
+ * Normalize URL to always use 127.0.0.1 instead of localhost
+ * This prevents CORS issues when WordPress generates URLs with one
+ * while the browser navigates to the other
+ */
+function normalizeUrl(url) {
+  try {
+    const urlObj = new URL(url);
+    // Always use 127.0.0.1 instead of localhost for consistency
+    if (urlObj.hostname === 'localhost') {
+      urlObj.hostname = '127.0.0.1';
+    }
+    return urlObj.toString();
+  } catch (error) {
+    // If URL parsing fails, try simple string replacement
+    return url.replace(/localhost/g, '127.0.0.1');
+  }
+}
+
+/**
  * Wait for server to be ready by polling the URL
  */
 async function waitForServer(url, maxAttempts = 30, interval = 1000) {
@@ -94,11 +113,14 @@ export async function launchWordPress() {
     }
   });
 
-  // Default to localhost:9400 if we can't find URL in output
+  // Default to 127.0.0.1:9400 if we can't find URL in output
   // This is a common default for WordPress Playground
   if (!serverUrl) {
-    serverUrl = 'http://localhost:9400';
+    serverUrl = 'http://127.0.0.1:9400';
   }
+
+  // Normalize URL to always use 127.0.0.1 (prevents CORS issues)
+  serverUrl = normalizeUrl(serverUrl);
 
   console.log(`Waiting for server to be ready at ${serverUrl}...`);
 
