@@ -21,17 +21,77 @@ function normalizeUrl(url) {
 
 /**
  * Launches WordPress Playground using @wp-playground/cli JavaScript API
- * Returns an object with methods to start/stop the instance
+ * Returns an object with methods to start/stop the instance and access logs
  */
 export async function launchWordPress() {
   console.log('Starting WordPress Playground...');
 
-  const cliServer = await runCLI({
-    command: 'server',
-    php: '8.3',
-    wp: 'latest',
-    login: true,
-  });
+  // Store logs and errors
+  const logs = [];
+  const errors = [];
+
+  // Capture console output during launch only
+  const originalConsoleError = console.error;
+  const originalConsoleWarn = console.warn;
+
+  console.error = (...args) => {
+    const message = args.map(arg =>
+      typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
+    ).join(' ');
+    errors.push({ type: 'console.error', message, timestamp: new Date().toISOString() });
+    originalConsoleError(...args);
+  };
+
+  console.warn = (...args) => {
+    const message = args.map(arg =>
+      typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
+    ).join(' ');
+    logs.push({ type: 'console.warn', message, timestamp: new Date().toISOString() });
+    originalConsoleWarn(...args);
+  };
+
+  let cliServer;
+  try {
+    // Use a blueprint to enable WordPress debug constants
+    // Reference: https://wordpress.github.io/wordpress-playground/blueprints/steps#defineWpConfigConsts
+    cliServer = await runCLI({
+      command: 'server',
+      php: '8.3',
+      wp: 'latest',
+      login: true,
+      debug: true,
+      blueprint: {
+        steps: [
+          {
+            step: 'defineWpConfigConsts',
+            consts: {
+              WP_DEBUG: true,
+              WP_DEBUG_DISPLAY: true,
+              WP_DEBUG_LOG: true,
+            },
+          },
+        ],
+      },
+    });
+
+    // Restore original console methods after successful launch
+    console.error = originalConsoleError;
+    console.warn = originalConsoleWarn;
+
+    console.log('✓ Enabled WP_DEBUG, WP_DEBUG_DISPLAY, and WP_DEBUG_LOG via blueprint');
+  } catch (error) {
+    // Restore original console methods on error
+    console.error = originalConsoleError;
+    console.warn = originalConsoleWarn;
+
+    errors.push({
+      type: 'launch.error',
+      message: error.message,
+      stack: error.stack,
+      timestamp: new Date().toISOString()
+    });
+    throw error;
+  }
 
   // Get the server URL from the CLI server instance
   // Based on available properties: ['playground', 'server', 'serverUrl', 'workerThreadCount']
@@ -43,7 +103,13 @@ export async function launchWordPress() {
 
   if (!serverUrl) {
     // If we still don't have a URL, log available properties for debugging
-    console.log('Warning: Could not find server URL. Available properties:', Object.keys(cliServer));
+    const availableProps = Object.keys(cliServer);
+    logs.push({
+      type: 'warning',
+      message: `Could not find server URL. Available properties: ${availableProps.join(', ')}`,
+      timestamp: new Date().toISOString()
+    });
+    console.log('Warning: Could not find server URL. Available properties:', availableProps);
     throw new Error('Could not determine server URL from CLI server instance');
   }
 
@@ -55,6 +121,8 @@ export async function launchWordPress() {
   return {
     url: serverUrl,
     server: cliServer,
+    logs: logs,
+    errors: errors,
     stop: async () => {
       try {
         // Try to stop the server - it may have a stop method or need cleanup via server property
@@ -68,6 +136,12 @@ export async function launchWordPress() {
           await cliServer.server.stop();
         }
       } catch (error) {
+        errors.push({
+          type: 'stop.error',
+          message: error.message,
+          stack: error.stack,
+          timestamp: new Date().toISOString()
+        });
         console.error('Error stopping server:', error);
       }
     },

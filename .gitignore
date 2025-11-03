@@ -32,6 +32,10 @@ wp-config.php
 # Log files
 *.log
 
+# Playwright test artifacts
+/test-results
+/playwright-report
+
 # htaccess
 /.htaccess
 
@@ -48,3 +52,4 @@ wp-config.php
 #/wp-content/themes
 
 /node_modules
+/test-results

@@ -1,0 +1,38 @@
+import { test as base } from '@playwright/test';
+
+/**
+ * WordPress Playground fixture for Playwright Test
+ * Provides access to the shared WordPress instance launched in global setup
+ *
+ * Uses environment variable (WP_PLAYGROUND_URL) set by global setup
+ * This is Playwright's recommended way to share setup data across workers
+ */
+export const test = base.extend({
+  wpInstance: async ({}, use) => {
+    // Read the WordPress URL from environment variable set by global setup
+    const wpUrl = process.env.WP_PLAYGROUND_URL;
+
+    if (!wpUrl) {
+      throw new Error(
+        'WordPress URL not found in environment. ' +
+        'Ensure global setup has run and set WP_PLAYGROUND_URL.'
+      );
+    }
+
+    // Create a minimal wpInstance object that provides the URL
+    // The actual server is managed by global setup/teardown
+    const wpInstance = {
+      url: wpUrl,
+      // Stop is a no-op since global teardown handles cleanup
+      stop: async () => {
+        // No-op - cleanup is handled in global teardown
+      },
+    };
+
+    // Provide to test
+    await use(wpInstance);
+  },
+});
+
+export { expect } from '@playwright/test';
+
