@@ -32,9 +32,52 @@ npm test
 
 ### Test Commands
 
+#### Running All Tests
+
 - `npm test` - Run all tests in headless mode
 - `npm run test:ui` - Run tests with Playwright UI mode (interactive)
 - `npm run test:headed` - Run tests with visible browser window
+
+#### Running Test Subsets
+
+Use Playwright's grep filters to run subsets by tag:
+
+```bash
+# Smoke tests (basic coverage)
+npx playwright test --grep "@smoke"
+
+# Public pages only
+npx playwright test --grep "@public"
+
+# Admin pages only
+npx playwright test --grep "@admin"
+
+# API tests (REST + RSS)
+npx playwright test --grep "@api"
+
+# Internal self-tests (error detection verification)
+# Note: By default, @internal tests are excluded. To include, set env var:
+INCLUDE_INTERNAL=1 npx playwright test --grep "@internal"
+
+# WordPress functionality tests (exclude internal)
+# (default behavior already excludes @internal)
+npx playwright test
+```
+
+#### Running Specific Test Files
+
+You can also run specific test files directly:
+
+```bash
+# Run a specific test file
+npx playwright test tests/public-pages.spec.js
+
+# Run tests matching a pattern
+npx playwright test --grep "homepage"
+
+# Run tests excluding certain tags
+npx playwright test --grep-invert "@internal"
+```
 
 ### Running with Visible Browser
 
@@ -80,17 +123,43 @@ npm run test:ui
 
 Tests are organized using Playwright Test framework:
 
+### Core Test Infrastructure
+
 - `tests/wp-fixtures.js` - Custom fixtures providing WordPress instance for each test
 - `tests/global-setup.js` - Launches WordPress Playground once for all tests
 - `tests/global-teardown.js` - Cleans up WordPress Playground after all tests
 - `tests/test-helpers.js` - Reusable test helper functions
-- Test spec files:
-  - `tests/public-pages.spec.js` - Public-facing WordPress pages
-  - `tests/admin-pages.spec.js` - Authenticated admin pages and POST requests
-  - `tests/rss-feeds.spec.js` - RSS feed validation
-  - `tests/rest-api.spec.js` - WordPress REST API endpoints
-  - `tests/console-errors.spec.js` - JavaScript error detection
-  - `tests/php-errors.spec.js` - PHP error detection
+
+### Test Categories
+
+#### Public Pages (`@public`)
+- `tests/public-pages.spec.js` - Tests for public-facing WordPress pages
+  - Homepage loading
+  - Multiple page validation
+  - Custom page options
+
+#### Admin Pages (`@admin`)
+- `tests/admin-pages.spec.js` - Tests for authenticated WordPress admin pages
+  - Admin dashboard access
+  - Multiple admin pages
+  - POST requests (form submissions)
+
+#### API Tests (`@api`)
+- `tests/rest-api.spec.js` - WordPress REST API endpoints
+- `tests/rss-feeds.spec.js` - RSS feed validation
+
+#### Internal Tests (`@internal`)
+- `tests/console-errors.spec.js` - Verifies JavaScript error detection is working
+- `tests/php-errors.spec.js` - Verifies PHP error detection is working
+
+### Smoke Tests (`@smoke`)
+
+Fast subset of tests that verify basic WordPress functionality:
+- Homepage loads without errors (`public-pages.spec.js`)
+- Admin dashboard is accessible (`admin-pages.spec.js`)
+- REST API base endpoint is accessible (`rest-api.spec.js`)
+
+Run smoke tests with: `npx playwright test --grep "@smoke"`
 
 ## Big Mistake Plugin
 

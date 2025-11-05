@@ -3,7 +3,11 @@ import {
   testWordPressPage,
 } from './test-helpers.js';
 
-test.describe('Console Error Detection', () => {
+/**
+ * @fileoverview Internal tests - verify JavaScript error detection is working
+ * These tests verify that the error detection mechanisms themselves are functioning correctly.
+ */
+test.describe('Console Error Detection', { tag: '@internal' }, () => {
 
   test('should capture and display JavaScript console errors via Big Mistake plugin', async ({ page, wpInstance }) => {
     // Set up listeners BEFORE navigation to ensure we capture all errors

@@ -3,7 +3,10 @@ import {
   testWordPressRSSFeed,
 } from './test-helpers.js';
 
-test.describe('WordPress RSS Feeds', () => {
+/**
+ * @fileoverview Tests for WordPress RSS feeds
+ */
+test.describe('WordPress RSS Feeds', { tag: ['@api', '@feed'] }, () => {
 
   test('should validate RSS feed structure', async ({ page, wpInstance }) => {
     await testWordPressRSSFeed(page, wpInstance, '/feed/');

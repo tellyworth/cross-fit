@@ -4,9 +4,12 @@ import {
   testWordPressPages,
 } from './test-helpers.js';
 
-test.describe('WordPress Public Pages', () => {
+/**
+ * @fileoverview Tests for public-facing WordPress pages
+ */
+test.describe('WordPress Public Pages', { tag: '@public' }, () => {
 
-  test('should load homepage without errors', async ({ page, wpInstance }) => {
+  test('should load homepage without errors', { tag: '@smoke' }, async ({ page, wpInstance }) => {
     await testWordPressPage(page, wpInstance, '/', {
       description: 'Test homepage',
     });

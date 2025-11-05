@@ -4,7 +4,11 @@ import {
   detectPHPErrors,
 } from './test-helpers.js';
 
-test.describe('PHP Error Detection', () => {
+/**
+ * @fileoverview Internal tests - verify PHP error detection is working
+ * These tests verify that the PHP error detection mechanisms themselves are functioning correctly.
+ */
+test.describe('PHP Error Detection', { tag: '@internal' }, () => {
 
   test('should detect PHP notice via Big Mistake plugin', async ({ page, wpInstance }) => {
     // Use Big Mistake plugin to trigger a PHP notice via GET parameter
