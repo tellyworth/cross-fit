@@ -8,6 +8,11 @@ export default defineConfig({
   fullyParallel: true, // Run tests in parallel with multiple workers
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
+  // By default, exclude internal self-tests unless explicitly included
+  // Set INCLUDE_INTERNAL=1 to run @internal tests
+  grepInvert: (process.env.INCLUDE_INTERNAL === '1' || process.env.INCLUDE_INTERNAL === 'true')
+    ? undefined
+    : /@internal/,
   // Use multiple workers - WordPress instance is shared via global setup
   workers: process.env.CI ? 2 : 3, // 3 workers locally, 2 in CI
   reporter: 'list',

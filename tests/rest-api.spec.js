@@ -4,9 +4,12 @@ import {
   testWordPressRESTEndpoints,
 } from './test-helpers.js';
 
-test.describe('WordPress REST API', () => {
+/**
+ * @fileoverview Tests for WordPress REST API endpoints
+ */
+test.describe('WordPress REST API', { tag: '@api' }, () => {
 
-  test('should access REST API base endpoint', async ({ page, wpInstance }) => {
+  test('should access REST API base endpoint', { tag: '@smoke' }, async ({ page, wpInstance }) => {
     const result = await testWordPressRESTAPI(page, wpInstance, '/wp-json/', {
       expectedStatus: 200,
     });

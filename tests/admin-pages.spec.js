@@ -3,9 +3,12 @@ import {
   testWordPressAdminPage,
 } from './test-helpers.js';
 
-test.describe('WordPress Admin Pages', () => {
+/**
+ * @fileoverview Tests for authenticated WordPress admin pages
+ */
+test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
 
-  test('should access authenticated admin dashboard', async ({ page, wpInstance }) => {
+  test('should access authenticated admin dashboard', { tag: '@smoke' }, async ({ page, wpInstance }) => {
     await testWordPressAdminPage(page, wpInstance, '/wp-admin/');
   });
 
