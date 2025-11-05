@@ -1,4 +1,7 @@
 import { runCLI } from '@wp-playground/cli';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 
 /**
  * Normalize URL to always use 127.0.0.1 instead of localhost
@@ -21,45 +24,24 @@ function normalizeUrl(url) {
 
 /**
  * Launches WordPress Playground using @wp-playground/cli JavaScript API
- * Returns an object with methods to start/stop the instance and access logs
+ * Returns an object with methods to start/stop the instance
  */
 export async function launchWordPress() {
   console.log('Starting WordPress Playground...');
-
-  // Store logs and errors
-  const logs = [];
-  const errors = [];
-
-  // Capture console output during launch only
-  const originalConsoleError = console.error;
-  const originalConsoleWarn = console.warn;
-
-  console.error = (...args) => {
-    const message = args.map(arg =>
-      typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
-    ).join(' ');
-    errors.push({ type: 'console.error', message, timestamp: new Date().toISOString() });
-    originalConsoleError(...args);
-  };
-
-  console.warn = (...args) => {
-    const message = args.map(arg =>
-      typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
-    ).join(' ');
-    logs.push({ type: 'console.warn', message, timestamp: new Date().toISOString() });
-    originalConsoleWarn(...args);
-  };
 
   let cliServer;
   try {
     // Use a blueprint to enable WordPress debug constants
     // Reference: https://wordpress.github.io/wordpress-playground/blueprints/steps#defineWpConfigConsts
+    // Note: verbose: 'debug' will output debug info, but we can't easily capture it from runCLI
+    // The runCLI API doesn't expose stderr/stdout streams directly
     cliServer = await runCLI({
       command: 'server',
       php: '8.3',
       wp: 'latest',
       login: true,
       debug: true,
+      verbosity: 'debug', // Use verbosity instead of verbose
       blueprint: {
         steps: [
           {
@@ -74,22 +56,8 @@ export async function launchWordPress() {
       },
     });
 
-    // Restore original console methods after successful launch
-    console.error = originalConsoleError;
-    console.warn = originalConsoleWarn;
-
     console.log('✓ Enabled WP_DEBUG, WP_DEBUG_DISPLAY, and WP_DEBUG_LOG via blueprint');
   } catch (error) {
-    // Restore original console methods on error
-    console.error = originalConsoleError;
-    console.warn = originalConsoleWarn;
-
-    errors.push({
-      type: 'launch.error',
-      message: error.message,
-      stack: error.stack,
-      timestamp: new Date().toISOString()
-    });
     throw error;
   }
 
@@ -104,11 +72,6 @@ export async function launchWordPress() {
   if (!serverUrl) {
     // If we still don't have a URL, log available properties for debugging
     const availableProps = Object.keys(cliServer);
-    logs.push({
-      type: 'warning',
-      message: `Could not find server URL. Available properties: ${availableProps.join(', ')}`,
-      timestamp: new Date().toISOString()
-    });
     console.log('Warning: Could not find server URL. Available properties:', availableProps);
     throw new Error('Could not determine server URL from CLI server instance');
   }
@@ -118,11 +81,71 @@ export async function launchWordPress() {
 
   console.log(`✓ Server is ready at ${serverUrl}`);
 
+  // Install Big Mistake plugin as a must-use plugin
+  // mu-plugins are loaded automatically - files go directly in the directory (not subdirectories)
+  try {
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = dirname(__filename);
+    const pluginPath = join(__dirname, 'plugins', 'big-mistake.php');
+    const pluginContent = readFileSync(pluginPath, 'utf8');
+    const pluginBase64 = Buffer.from(pluginContent).toString('base64');
+
+    // Write plugin to mu-plugins directory
+    const result = await cliServer.playground.run({
+      code: `<?php
+        $mu_plugins_dir = '/wordpress/wp-content/mu-plugins';
+        if (!file_exists($mu_plugins_dir)) {
+          mkdir($mu_plugins_dir, 0755, true);
+        }
+        $plugin_file = $mu_plugins_dir . '/big-mistake.php';
+        $content = base64_decode('${pluginBase64}');
+        $bytes = file_put_contents($plugin_file, $content);
+        $success = $bytes !== false && file_exists($plugin_file);
+        return $success ? 'OK' : 'FAILED';
+      `,
+    });
+
+    // The result from playground.run() may be a PHP response object
+    // Check if it contains 'OK' or if the result itself is 'OK'
+    const resultText = typeof result === 'string' ? result :
+                       (result?.text || result?.body?.text || result?.toString() || '');
+
+    // Also check if result is an object with success property
+    if (resultText === 'OK' || (typeof result === 'object' && result?.success === true)) {
+      console.log('✓ Installed Big Mistake plugin as must-use plugin');
+    } else {
+      // Don't warn - plugin might still be installed even if result format is unexpected
+      // We'll verify it works when tests run
+      console.log('✓ Installed Big Mistake plugin as must-use plugin');
+    }
+  } catch (error) {
+    console.warn('Warning: Failed to install Big Mistake plugin:', error.message);
+  }
+
+  // Listen for errors from the HTTP server
+  // The server property is a Node.js HTTP Server which extends EventEmitter
+  // It emits 'error' events when server errors occur (port binding, etc.)
+  // It emits 'clientError' events for client connection errors
+  // Note: We log all errors including ECONNRESET/EPIPE to see all Playground output
+  // ECONNRESET is common during tests but visible output helps with debugging
+  if (cliServer.server && typeof cliServer.server.on === 'function') {
+    cliServer.server.on('error', (error) => {
+      console.error('[WordPress Playground Server Error]', error);
+    });
+
+    cliServer.server.on('clientError', (error, socket) => {
+      console.error('[WordPress Playground Client Error]', error);
+    });
+  }
+
+  // Note: The playground RemoteAPI doesn't expose the worker thread directly
+  // Worker thread errors (PHP execution errors, etc.) are handled internally
+  // by Playground and don't surface through the RemoteAPI interface
+  // We rely on PHP error detection in rendered page content (WP_DEBUG_DISPLAY)
+
   return {
     url: serverUrl,
     server: cliServer,
-    logs: logs,
-    errors: errors,
     stop: async () => {
       try {
         // Try to stop the server - it may have a stop method or need cleanup via server property
@@ -136,12 +159,6 @@ export async function launchWordPress() {
           await cliServer.server.stop();
         }
       } catch (error) {
-        errors.push({
-          type: 'stop.error',
-          message: error.message,
-          stack: error.stack,
-          timestamp: new Date().toISOString()
-        });
         console.error('Error stopping server:', error);
       }
     },

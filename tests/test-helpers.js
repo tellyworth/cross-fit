@@ -27,6 +27,97 @@ function normalizePath(baseUrl, path) {
 }
 
 /**
+ * Detect PHP errors in page content
+ * When WP_DEBUG_DISPLAY is enabled, PHP errors appear in the rendered HTML
+ * @param {string} htmlContent - HTML content of the page
+ * @returns {Array} Array of detected PHP errors with details
+ */
+export function detectPHPErrors(htmlContent) {
+  const errors = [];
+
+  // PHP error patterns (case-insensitive)
+  // These match common PHP error formats when display_errors is on
+  // Note: PHP errors in HTML may be wrapped in <b> tags or other HTML
+  const phpErrorPatterns = [
+    // PHP Fatal errors (with optional HTML tags)
+    /<b>Fatal\s+error<\/b>:\s*([^<\n]+)/gi,
+    /Fatal\s+error:\s*([^\n]+)/gi,
+    // PHP Parse errors (with optional HTML tags)
+    /<b>Parse\s+error<\/b>:\s*([^<\n]+)/gi,
+    /Parse\s+error:\s*([^\n]+)/gi,
+    // PHP Warnings (with optional HTML tags)
+    /<b>Warning<\/b>:\s*([^<\n]+)/gi,
+    /Warning:\s*([^\n]+)/gi,
+    // PHP Notices (with optional HTML tags)
+    /<b>Notice<\/b>:\s*([^<\n]+)/gi,
+    /Notice:\s*([^\n]+)/gi,
+    // PHP Deprecated warnings (with optional HTML tags)
+    /<b>Deprecated<\/b>:\s*([^<\n]+)/gi,
+    /Deprecated:\s*([^\n]+)/gi,
+    // PHP Strict errors
+    /<b>Strict\s+(?:Standards\s+)?(?:Warning|Error|Notice)<\/b>:\s*([^<\n]+)/gi,
+    /Strict\s+(?:Standards\s+)?(?:Warning|Error|Notice):\s*([^\n]+)/gi,
+    // PHP Errors with file locations (HTML wrapped)
+    /<b>(?:Fatal\s+)?(?:Parse\s+)?(?:Warning|Error|Notice)<\/b>:\s*([^<\n]+?)\s+in\s+<b>([^<]+)<\/b>\s+on\s+line\s+<b>(\d+)<\/b>/gi,
+    /PHP\s+(?:Fatal\s+)?(?:Parse\s+)?(?:Warning|Error|Notice):\s*([^\n]+?)\s+in\s+([^\s:]+)(?::(\d+))?/gi,
+    // WordPress-style debug messages (if displayed)
+    /WordPress\s+Database\s+Error:\s*([^\n]+)/gi,
+    // Catch-all for any remaining PHP error-like patterns
+    /\[PHP\s+Error\]\s*([^\n]+)/gi,
+  ];
+
+  // Match all error patterns
+  phpErrorPatterns.forEach((pattern, index) => {
+    let match;
+    // Reset regex lastIndex
+    pattern.lastIndex = 0;
+
+    while ((match = pattern.exec(htmlContent)) !== null) {
+      const errorMessage = match[1] || match[0];
+      const fileName = match[2] || null;
+      const lineNumber = match[3] || null;
+
+      // Avoid duplicates - check if we already have this error
+      const isDuplicate = errors.some(err =>
+        err.message === errorMessage &&
+        err.file === fileName &&
+        err.line === lineNumber
+      );
+
+      if (!isDuplicate) {
+        errors.push({
+          type: detectErrorType(match[0]),
+          message: errorMessage.trim(),
+          file: fileName,
+          line: lineNumber ? parseInt(lineNumber, 10) : null,
+          raw: match[0],
+          matchIndex: index,
+        });
+      }
+    }
+  });
+
+  return errors;
+}
+
+/**
+ * Determine PHP error type from error text
+ * @param {string} errorText - Raw error text
+ * @returns {string} Error type (fatal, parse, warning, notice, etc.)
+ */
+function detectErrorType(errorText) {
+  const lowerText = errorText.toLowerCase();
+  if (lowerText.includes('fatal error')) return 'fatal';
+  if (lowerText.includes('parse error')) return 'parse';
+  if (lowerText.includes('deprecated')) return 'deprecated';
+  if (lowerText.includes('strict')) return 'strict';
+  if (lowerText.includes('warning')) return 'warning';
+  if (lowerText.includes('notice')) return 'notice';
+  if (lowerText.includes('database error')) return 'database';
+  return 'error';
+}
+
+/**
  * Test a WordPress page URL with standard checks:
  * - HTTP response status
  * - JavaScript console errors
@@ -42,6 +133,7 @@ function normalizePath(baseUrl, path) {
  * @param {string|RegExp} options.expectedBodyClass - Expected body class (optional)
  * @param {boolean} options.allowConsoleErrors - Allow console errors (default: false)
  * @param {boolean} options.allowPageErrors - Allow page errors (default: false)
+ * @param {boolean} options.allowPHPErrors - Allow PHP errors (default: false)
  * @param {string} options.description - Description for test.step (optional)
  */
 export async function testWordPressPage(page, wpInstance, path, options = {}) {
@@ -52,6 +144,7 @@ export async function testWordPressPage(page, wpInstance, path, options = {}) {
     expectedBodyClass = null,
     allowConsoleErrors = false,
     allowPageErrors = false,
+    allowPHPErrors = false,
     description = null,
   } = options;
 
@@ -83,6 +176,10 @@ export async function testWordPressPage(page, wpInstance, path, options = {}) {
   // Wait for page to fully load
   await page.waitForLoadState('networkidle');
 
+  // Detect PHP errors in page content (when WP_DEBUG_DISPLAY is enabled)
+  const pageContent = await page.content();
+  const phpErrors = detectPHPErrors(pageContent);
+
   // Validate title if specified
   if (expectedTitle) {
     const title = await page.title();
@@ -112,11 +209,24 @@ export async function testWordPressPage(page, wpInstance, path, options = {}) {
     expect(pageErrors).toHaveLength(0);
   }
 
+  // Check for PHP errors (unless explicitly allowed via options)
+  if (!allowPHPErrors && phpErrors.length > 0) {
+    console.error('\n[PHP Errors Detected]');
+    phpErrors.forEach((err, i) => {
+      console.error(`  ${i + 1}. ${err.type.toUpperCase()}: ${err.message}`);
+      if (err.file) {
+        console.error(`     File: ${err.file}${err.line ? `:${err.line}` : ''}`);
+      }
+    });
+    expect(phpErrors).toHaveLength(0);
+  }
+
   // Return test results for additional assertions if needed
   return {
     response,
     consoleErrors,
     pageErrors,
+    phpErrors,
     title: await page.title(),
     bodyClasses: await page.evaluate(() => document.body.className),
   };
@@ -254,6 +364,10 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
     // If none found, continue - we'll check below
   });
 
+  // Detect PHP errors in page content (when WP_DEBUG_DISPLAY is enabled)
+  const pageContent = await page.content();
+  const phpErrors = detectPHPErrors(pageContent);
+
   // Check for admin-specific elements
   const adminCheck = await page.evaluate(() => {
     return {
@@ -276,10 +390,24 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
     adminCheck.hasWpBodyContent
   ).toBe(true);
 
+  // Check for PHP errors (unless explicitly allowed)
+  const allowPHPErrors = options.allowPHPErrors || false;
+  if (!allowPHPErrors && phpErrors.length > 0) {
+    console.error('\n[PHP Errors Detected in Admin Page]');
+    phpErrors.forEach((err, i) => {
+      console.error(`  ${i + 1}. ${err.type.toUpperCase()}: ${err.message}`);
+      if (err.file) {
+        console.error(`     File: ${err.file}${err.line ? `:${err.line}` : ''}`);
+      }
+    });
+    expect(phpErrors).toHaveLength(0);
+  }
+
   return {
     response,
     adminCheck,
     isAuthenticated: !isLoginPage,
+    phpErrors,
   };
 }
 
