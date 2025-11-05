@@ -35,7 +35,6 @@ npm test
 - `npm test` - Run all tests in headless mode
 - `npm run test:ui` - Run tests with Playwright UI mode (interactive)
 - `npm run test:headed` - Run tests with visible browser window
-- `npm run test:old` - Run the old script-based test (for reference)
 
 ### Running with Visible Browser
 
@@ -68,8 +67,11 @@ npm run test:ui
 - ✅ Test public pages (root URL)
 - ✅ Test authenticated admin pages (`/wp-admin/`)
 - ✅ Test RSS feed with XML validation (`/feed/`)
+- ✅ Test REST API endpoints
 - ✅ Test POST requests (form submissions, database changes)
 - ✅ Detect JavaScript console errors
+- ✅ Detect JavaScript uncaught exceptions
+- ✅ Detect PHP errors (notices, warnings, fatal errors)
 - ✅ Detect page errors
 - ✅ Validate HTTP response status codes
 - ✅ Verify page content (titles, classes, structure)
@@ -79,23 +81,33 @@ npm run test:ui
 Tests are organized using Playwright Test framework:
 
 - `tests/wp-fixtures.js` - Custom fixtures providing WordPress instance for each test
-- `tests/wordpress.spec.js` - Test suite with all test cases:
-  - Public homepage test
-  - Admin dashboard authentication test
-  - RSS feed validation test
-  - POST request test (changing site options)
+- `tests/global-setup.js` - Launches WordPress Playground once for all tests
+- `tests/global-teardown.js` - Cleans up WordPress Playground after all tests
+- `tests/test-helpers.js` - Reusable test helper functions
+- Test spec files:
+  - `tests/public-pages.spec.js` - Public-facing WordPress pages
+  - `tests/admin-pages.spec.js` - Authenticated admin pages and POST requests
+  - `tests/rss-feeds.spec.js` - RSS feed validation
+  - `tests/rest-api.spec.js` - WordPress REST API endpoints
+  - `tests/console-errors.spec.js` - JavaScript error detection
+  - `tests/php-errors.spec.js` - PHP error detection
+
+## Big Mistake Plugin
+
+The test suite includes a helper plugin (`src/plugins/big-mistake.php`) that automatically installs as a must-use plugin. This plugin allows tests to trigger PHP and JavaScript errors on demand for testing error detection:
+
+- PHP errors: Use `?trigger_php_error=notice|warning|fatal|deprecated` or `X-Trigger-PHP-Error` header
+- JavaScript errors: Use `?trigger_js_error=1` or `X-Trigger-JS-Error` header
 
 ## Current Limitations
 
 This is an MVP. Currently it:
-- Does not detect PHP errors directly (only JS/console errors)
 - Does not test additional public pages (like `/about/`)
-- Limited error reporting (basic console output only)
+- Limited test coverage for edge cases
 
 ## Next Steps
 
 - Add tests for additional pages (`/about/`, custom pages)
-- Implement PHP error detection
 - Add more sophisticated test scenarios
 - Add support for testing plugins and themes
 - Improve test reporting and output
