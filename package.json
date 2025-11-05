@@ -4,10 +4,10 @@
   "description": "End-to-end testing tool for WordPress using WordPress Playground",
   "type": "module",
   "scripts": {
-    "test": "playwright test",
-    "test:ui": "playwright test --ui",
-    "test:headed": "HEADLESS=false playwright test",
-    "test:internal": "INCLUDE_INTERNAL=1 playwright test --grep @internal"
+    "test": "node scripts/run-tests.mjs",
+    "test:ui": "node scripts/run-tests.mjs --ui",
+    "test:headed": "HEADLESS=false node scripts/run-tests.mjs",
+    "test:internal": "INCLUDE_INTERNAL=1 node scripts/run-tests.mjs --grep @internal"
   },
   "keywords": [
     "wordpress",
