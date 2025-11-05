@@ -1,4 +1,7 @@
 import { runCLI } from '@wp-playground/cli';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 
 /**
  * Normalize URL to always use 127.0.0.1 instead of localhost
@@ -77,6 +80,41 @@ export async function launchWordPress() {
   serverUrl = normalizeUrl(serverUrl);
 
   console.log(`✓ Server is ready at ${serverUrl}`);
+
+  // Install Big Mistake plugin as a must-use plugin
+  // mu-plugins are loaded automatically - files go directly in the directory (not subdirectories)
+  try {
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = dirname(__filename);
+    const pluginPath = join(__dirname, 'plugins', 'big-mistake.php');
+    const pluginContent = readFileSync(pluginPath, 'utf8');
+    const pluginBase64 = Buffer.from(pluginContent).toString('base64');
+
+    // Write plugin to mu-plugins directory
+    const result = await cliServer.playground.run({
+      code: `<?php
+        $mu_plugins_dir = '/wordpress/wp-content/mu-plugins';
+        if (!file_exists($mu_plugins_dir)) {
+          mkdir($mu_plugins_dir, 0755, true);
+        }
+        $plugin_file = $mu_plugins_dir . '/big-mistake.php';
+        $content = base64_decode('${pluginBase64}');
+        $bytes = file_put_contents($plugin_file, $content);
+        $success = $bytes !== false && file_exists($plugin_file);
+        return $success ? 'OK' : 'FAILED';
+      `,
+    });
+
+    // The result is a PHP response object, check if it contains 'OK'
+    const resultText = typeof result === 'string' ? result : (result?.text || result?.toString() || '');
+    if (resultText !== 'OK') {
+      console.warn('Warning: Plugin installation may have failed. Result:', resultText);
+    } else {
+      console.log('✓ Installed Big Mistake plugin as must-use plugin');
+    }
+  } catch (error) {
+    console.warn('Warning: Failed to install Big Mistake plugin:', error.message);
+  }
 
   // Listen for errors from the HTTP server
   // The server property is a Node.js HTTP Server which extends EventEmitter

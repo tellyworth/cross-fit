@@ -19,10 +19,14 @@ export const test = base.extend({
       );
     }
 
-    // Create a minimal wpInstance object that provides the URL
+    // Get the full instance from global scope (includes server for playground access)
+    const fullInstance = global.wpInstance;
+
+    // Create a wpInstance object that provides the URL and server
     // The actual server is managed by global setup/teardown
     const wpInstance = {
       url: wpUrl,
+      server: fullInstance?.server || null, // Expose server for playground API access
       // Stop is a no-op since global teardown handles cleanup
       stop: async () => {
         // No-op - cleanup is handled in global teardown

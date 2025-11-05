@@ -37,20 +37,28 @@ export function detectPHPErrors(htmlContent) {
 
   // PHP error patterns (case-insensitive)
   // These match common PHP error formats when display_errors is on
+  // Note: PHP errors in HTML may be wrapped in <b> tags or other HTML
   const phpErrorPatterns = [
-    // PHP Fatal errors
+    // PHP Fatal errors (with optional HTML tags)
+    /<b>Fatal\s+error<\/b>:\s*([^<\n]+)/gi,
     /Fatal\s+error:\s*([^\n]+)/gi,
-    // PHP Parse errors
+    // PHP Parse errors (with optional HTML tags)
+    /<b>Parse\s+error<\/b>:\s*([^<\n]+)/gi,
     /Parse\s+error:\s*([^\n]+)/gi,
-    // PHP Warnings
+    // PHP Warnings (with optional HTML tags)
+    /<b>Warning<\/b>:\s*([^<\n]+)/gi,
     /Warning:\s*([^\n]+)/gi,
-    // PHP Notices
+    // PHP Notices (with optional HTML tags)
+    /<b>Notice<\/b>:\s*([^<\n]+)/gi,
     /Notice:\s*([^\n]+)/gi,
-    // PHP Deprecated warnings
+    // PHP Deprecated warnings (with optional HTML tags)
+    /<b>Deprecated<\/b>:\s*([^<\n]+)/gi,
     /Deprecated:\s*([^\n]+)/gi,
     // PHP Strict errors
+    /<b>Strict\s+(?:Standards\s+)?(?:Warning|Error|Notice)<\/b>:\s*([^<\n]+)/gi,
     /Strict\s+(?:Standards\s+)?(?:Warning|Error|Notice):\s*([^\n]+)/gi,
-    // PHP Errors with file locations
+    // PHP Errors with file locations (HTML wrapped)
+    /<b>(?:Fatal\s+)?(?:Parse\s+)?(?:Warning|Error|Notice)<\/b>:\s*([^<\n]+?)\s+in\s+<b>([^<]+)<\/b>\s+on\s+line\s+<b>(\d+)<\/b>/gi,
     /PHP\s+(?:Fatal\s+)?(?:Parse\s+)?(?:Warning|Error|Notice):\s*([^\n]+?)\s+in\s+([^\s:]+)(?::(\d+))?/gi,
     // WordPress-style debug messages (if displayed)
     /WordPress\s+Database\s+Error:\s*([^\n]+)/gi,
