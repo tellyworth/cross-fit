@@ -3,6 +3,33 @@ import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
+async function resolveBlueprintFromArg(arg) {
+  if (!arg) return null;
+  try {
+    // URL case
+    if (/^https?:\/\//i.test(arg)) {
+      const res = await fetch(arg);
+      if (!res.ok) throw new Error(`Failed to fetch blueprint URL: ${res.status}`);
+      return await res.json();
+    }
+    // Local file path
+    const content = readFileSync(arg, 'utf8');
+    return JSON.parse(content);
+  } catch (e) {
+    console.warn(`Warning: Could not load blueprint from ${arg}:`, e.message);
+    return null;
+  }
+}
+
+function extractBlueprintArgFromProcess() {
+  const envArg = process.env.WP_BLUEPRINT || process.env.WP_PLAYGROUND_BLUEPRINT;
+  if (envArg) return envArg;
+  const argvArg = (process.argv || []).find(a => a.startsWith('--blueprint='));
+  if (argvArg) return argvArg.split('=')[1];
+  return null;
+}
+// (imports defined at top)
+
 /**
  * Normalize URL to always use 127.0.0.1 instead of localhost
  * This prevents CORS issues when WordPress generates URLs with one
@@ -31,10 +58,35 @@ export async function launchWordPress() {
 
   let cliServer;
   try {
-    // Use a blueprint to enable WordPress debug constants
+    // Resolve optional user-provided blueprint
+    const blueprintArg = extractBlueprintArgFromProcess();
+    const userBlueprint = await resolveBlueprintFromArg(blueprintArg);
+
+    // Base blueprint: enable WordPress debug constants
     // Reference: https://wordpress.github.io/wordpress-playground/blueprints/steps#defineWpConfigConsts
     // Note: verbose: 'debug' will output debug info, but we can't easily capture it from runCLI
     // The runCLI API doesn't expose stderr/stdout streams directly
+    const baseSteps = [
+      {
+        step: 'defineWpConfigConsts',
+        consts: {
+          WP_DEBUG: true,
+          WP_DEBUG_DISPLAY: true,
+          WP_DEBUG_LOG: true,
+        },
+      },
+    ];
+
+    // Merge user blueprint if provided: prepend our base steps
+    const finalBlueprint = userBlueprint
+      ? {
+          ...userBlueprint,
+          steps: Array.isArray(userBlueprint.steps)
+            ? [...baseSteps, ...userBlueprint.steps]
+            : baseSteps,
+        }
+      : { steps: baseSteps };
+
     cliServer = await runCLI({
       command: 'server',
       php: '8.3',
@@ -42,21 +94,13 @@ export async function launchWordPress() {
       login: true,
       debug: true,
       verbosity: 'debug', // Use verbosity instead of verbose
-      blueprint: {
-        steps: [
-          {
-            step: 'defineWpConfigConsts',
-            consts: {
-              WP_DEBUG: true,
-              WP_DEBUG_DISPLAY: true,
-              WP_DEBUG_LOG: true,
-            },
-          },
-        ],
-      },
+      blueprint: finalBlueprint,
     });
 
     console.log('✓ Enabled WP_DEBUG, WP_DEBUG_DISPLAY, and WP_DEBUG_LOG via blueprint');
+    if (blueprintArg) {
+      console.log(`✓ Applied user blueprint from ${blueprintArg}`);
+    }
   } catch (error) {
     throw error;
   }

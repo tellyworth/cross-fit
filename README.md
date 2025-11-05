@@ -31,6 +31,23 @@ npm test
 ```
 
 ### Test Commands
+#### Loading a Blueprint
+
+You can optionally load a WordPress Blueprint before running tests. Provide a local file path or a URL with our test runner wrapper:
+
+```bash
+# From URL (example: Theme a11y test blueprint)
+npm test -- --blueprint=https://raw.githubusercontent.com/wordpress/blueprints/trunk/blueprints/theme-a11y-test/blueprint.json
+
+# From local file
+npm test -- --blueprint=./path/to/blueprint.json
+
+# Alternatively via environment variable
+WP_BLUEPRINT=./path/to/blueprint.json npm test
+```
+
+The provided blueprint is merged with our base debug step (WP_DEBUG, WP_DEBUG_DISPLAY, WP_DEBUG_LOG), which is prepended to ensure PHP errors are visible in rendered pages.
+
 
 #### Running All Tests
 
