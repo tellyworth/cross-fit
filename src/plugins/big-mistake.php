@@ -81,3 +81,58 @@ function big_mistake_trigger_errors() {
 // Hook early to catch all errors
 add_action('init', 'big_mistake_trigger_errors', 1);
 
+
+/**
+ * Disable dashboard widgets that fetch external RSS feeds
+ * This prevents slow server-side timeouts when fetching wordpress.org feeds
+ */
+function big_mistake_disable_external_feeds() {
+  // Remove dashboard widgets that fetch external RSS feeds
+  // These widgets cause slow timeouts in Playground environments
+  remove_meta_box('dashboard_primary', 'dashboard', 'side'); // WordPress News
+  remove_meta_box('dashboard_secondary', 'dashboard', 'side'); // Other WordPress News
+  remove_meta_box('dashboard_plugins', 'dashboard', 'normal'); // Plugins feed
+}
+
+add_action('wp_dashboard_setup', 'big_mistake_disable_external_feeds', 999);
+
+/**
+ * Reduce HTTP timeouts for external requests to fail fast
+ * When requests timeout, they will trigger PHP errors
+ */
+function big_mistake_reduce_http_timeout($args, $url) {
+  $site_host = parse_url(get_site_url(), PHP_URL_HOST);
+  $request_host = parse_url($url, PHP_URL_HOST);
+
+  if ($request_host && $request_host !== $site_host) {
+    $args['timeout'] = 0.1;
+    $args['connect_timeout'] = 0.1;
+  }
+
+  return $args;
+}
+
+add_filter('http_request_args', 'big_mistake_reduce_http_timeout', 999, 2);
+
+/**
+ * Trigger PHP errors when HTTP requests fail due to timeout
+ * This ensures failed requests are visible in WP_DEBUG_DISPLAY output
+ */
+function big_mistake_trigger_http_error($response, $args, $url) {
+  if (is_wp_error($response)) {
+    $error_message = $response->get_error_message();
+    // Check if error is timeout-related (connection timeout, request timeout, etc.)
+    if (stripos($error_message, 'timeout') !== false ||
+        stripos($error_message, 'timed out') !== false) {
+      trigger_error(
+        sprintf('HTTP request failed: %s (URL: %s)', $error_message, $url),
+        E_USER_WARNING
+      );
+    }
+  }
+
+  return $response;
+}
+
+add_filter('http_response', 'big_mistake_trigger_http_error', 10, 3);
+
