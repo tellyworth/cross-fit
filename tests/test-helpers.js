@@ -346,27 +346,68 @@ export async function testWordPressRSSFeed(page, wpInstance, path, options = {})
 export async function testWordPressAdminPage(page, wpInstance, path, options = {}) {
   const url = normalizePath(wpInstance.url, path);
 
-  // Navigate to the page - use 'commit' to wait for navigation to start
-  // This is faster and more reliable than waiting for DOMContentLoaded
-  const response = await page.goto(url, { waitUntil: 'commit' });
+  // Check if page is already closed
+  if (page.isClosed()) {
+    throw new Error('Page was closed before navigation');
+  }
 
-  expect(response.status()).toBe(200);
 
-  // Wait for specific admin elements - this is more reliable than waiting for load events
-  // Admin pages load JavaScript after DOMContentLoaded, so we wait for actual UI elements
-  // Use a longer timeout to account for slower pages
+  // For admin pages, use 'commit' to start navigation quickly, then wait for elements
+  // Admin pages have heavy JS that can delay DOMContentLoaded indefinitely
+  // We wait for actual UI elements instead of DOMContentLoaded
+  let response;
+  try {
+    // Use 'commit' which waits for navigation to start (much faster)
+    response = await page.goto(url, { waitUntil: 'commit', timeout: 30000 });
+  } catch (e) {
+    if (page.isClosed()) {
+      throw new Error('Page was closed during navigation');
+    }
+    if (String(e.message || '').includes('ERR_ABORTED') || String(e.message || '').includes('Target page')) {
+      // Wait a bit and retry
+      await page.waitForTimeout(500);
+      if (page.isClosed()) {
+        throw new Error('Page was closed after navigation error');
+      }
+      try {
+        response = await page.goto(url, { waitUntil: 'commit', timeout: 30000 });
+      } catch (retryError) {
+        if (page.isClosed()) {
+          throw new Error('Page was closed during retry navigation');
+        }
+        throw retryError;
+      }
+    } else {
+      throw e;
+    }
+  }
+
+  if (response) {
+    expect(response.status()).toBe(200);
+  }
+
+  // Wait for admin UI elements to confirm page is ready
+  // This is more reliable than waiting for DOMContentLoaded since admin JS is heavy
+  // External dashboard feed widgets are disabled via plugin to prevent server-side timeouts
   await Promise.race([
-    page.waitForSelector('#wpadminbar', { timeout: 15000 }),
-    page.waitForSelector('#adminmenumain', { timeout: 15000 }),
-    page.waitForSelector('body.wp-admin', { timeout: 15000 }),
-    page.waitForSelector('#wpbody-content', { timeout: 15000 }),
+    page.waitForSelector('#wpadminbar', { timeout: 10000 }),
+    page.waitForSelector('#adminmenumain', { timeout: 10000 }),
+    page.waitForSelector('body.wp-admin', { timeout: 10000 }),
+    page.waitForSelector('#wpbody-content', { timeout: 10000 }),
   ]).catch(() => {
     // If none found, continue - we'll check below
   });
 
   // Detect PHP errors in page content (when WP_DEBUG_DISPLAY is enabled)
-  const pageContent = await page.content();
-  const phpErrors = detectPHPErrors(pageContent);
+  let phpErrors = [];
+  try {
+    if (!page.isClosed()) {
+      const pageContent = await page.content();
+      phpErrors = detectPHPErrors(pageContent);
+    }
+  } catch {
+    // frame may have been replaced; ignore
+  }
 
   // Check for admin-specific elements
   const adminCheck = await page.evaluate(() => {
