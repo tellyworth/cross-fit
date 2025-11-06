@@ -17,6 +17,11 @@ async function globalSetup() {
   // This is Playwright's recommended way to share setup data
   process.env.WP_PLAYGROUND_URL = wpInstance.url;
 
+  // Store the debug log path for workers to access
+  if (wpInstance.debugLogPath) {
+    process.env.WP_PLAYGROUND_DEBUG_LOG = wpInstance.debugLogPath;
+  }
+
   // Store the instance on the global object so teardown can access it
   // The global object persists in this process between setup and teardown
   global.wpInstance = wpInstance;

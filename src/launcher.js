@@ -1,7 +1,8 @@
 import { runCLI } from '@wp-playground/cli';
-import { readFileSync } from 'fs';
+import { readFileSync, mkdtempSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { tmpdir } from 'os';
 
 async function resolveBlueprintFromArg(arg) {
   if (!arg) return null;
@@ -56,6 +57,10 @@ function normalizeUrl(url) {
 export async function launchWordPress() {
   console.log('Starting WordPress Playground...');
 
+  // Create our own temp directory that we can access for debug.log
+  // This directory will be mounted to /wordpress in Playground's VFS
+  const ourTempDir = mkdtempSync(join(tmpdir(), 'cross-fit-wp-'));
+
   let cliServer;
   try {
     // Resolve optional user-provided blueprint
@@ -63,9 +68,6 @@ export async function launchWordPress() {
     const userBlueprint = await resolveBlueprintFromArg(blueprintArg);
 
     // Base blueprint: enable WordPress debug constants
-    // Reference: https://wordpress.github.io/wordpress-playground/blueprints/steps#defineWpConfigConsts
-    // Note: verbose: 'debug' will output debug info, but we can't easily capture it from runCLI
-    // The runCLI API doesn't expose stderr/stdout streams directly
     const baseSteps = [
       {
         step: 'defineWpConfigConsts',
@@ -87,14 +89,22 @@ export async function launchWordPress() {
         }
       : { steps: baseSteps };
 
+    // Mount our temp directory to /wordpress before installation
+    // This ensures WordPress files (including debug.log) are stored in our known directory
     cliServer = await runCLI({
       command: 'server',
       php: '8.3',
       wp: 'latest',
       login: true,
       debug: true,
-      verbosity: 'debug', // Use verbosity instead of verbose
+      verbosity: 'debug',
       blueprint: finalBlueprint,
+      'mount-before-install': [
+        {
+          hostPath: ourTempDir,
+          vfsPath: '/wordpress',
+        },
+      ],
     });
 
     console.log('✓ Enabled WP_DEBUG, WP_DEBUG_DISPLAY, and WP_DEBUG_LOG via blueprint');
@@ -190,6 +200,8 @@ export async function launchWordPress() {
   return {
     url: serverUrl,
     server: cliServer,
+    // Since we mounted /wordpress to our temp dir, debug.log is directly in wp-content
+    debugLogPath: `${ourTempDir}/wp-content/debug.log`,
     stop: async () => {
       try {
         // Try to stop the server - it may have a stop method or need cleanup via server property

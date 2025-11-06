@@ -1,4 +1,5 @@
 import { expect } from '@playwright/test';
+import { readFileSync, existsSync } from 'fs';
 
 /**
  * Reusable test helpers for WordPress E2E testing
@@ -101,10 +102,47 @@ export function detectPHPErrors(htmlContent) {
 }
 
 /**
- * Determine PHP error type from error text
- * @param {string} errorText - Raw error text
- * @returns {string} Error type (fatal, parse, warning, notice, etc.)
+ * Read WordPress debug log from Playground filesystem
+ *
+ * @param {Object} wpInstance - WordPress instance with server property
+ * @param {Object} options - Optional options
+ * @param {string} options.filter - Filter log lines by this string (e.g., '[Big Mistake]')
+ * @param {number} options.limit - Maximum number of lines to return (default: 50)
+ * @returns {Promise<string>} - Debug log content (filtered if specified)
  */
+export async function readDebugLog(wpInstance, options = {}) {
+  const { filter = null, limit = 50 } = options;
+
+  if (!wpInstance?.debugLogPath) {
+    return null;
+  }
+
+  try {
+    if (!existsSync(wpInstance.debugLogPath)) {
+      return null;
+    }
+
+    const logContent = readFileSync(wpInstance.debugLogPath, 'utf8');
+    const lines = logContent.split('\n').filter(line => line.trim());
+
+    let filteredLines = lines;
+    if (filter) {
+      filteredLines = lines.filter(line => line.includes(filter));
+    }
+
+    const selectedLines = filteredLines.slice(-limit);
+
+    if (selectedLines.length > 0) {
+      return selectedLines.join('\n');
+    }
+
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
+
 function detectErrorType(errorText) {
   const lowerText = errorText.toLowerCase();
   if (lowerText.includes('fatal error')) return 'fatal';

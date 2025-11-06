@@ -38,6 +38,11 @@ async function main() {
     // Do not forward --blueprint to Playwright
   }
 
+  if (options.debugLog || options['debug-log']) {
+    env.WP_DEBUG_LOG_LINES = options.debugLog || options['debug-log'];
+    // Do not forward --debug-log to Playwright
+  }
+
   // Future options (examples, not implemented):
   // if (options.plugins) env.WP_PLUGINS = options.plugins;
   // if (options.baseline) env.BASELINE = '1';

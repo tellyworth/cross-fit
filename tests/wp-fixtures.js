@@ -24,10 +24,13 @@ export const test = base.extend({
 
     // Create a wpInstance object that provides the URL and server
     // The actual server is managed by global setup/teardown
+    // Use environment variable for debug log path (accessible in worker processes)
+    const debugLogPath = process.env.WP_PLAYGROUND_DEBUG_LOG || fullInstance?.debugLogPath || null;
+
     const wpInstance = {
       url: wpUrl,
-      server: fullInstance?.server || null, // Expose server for playground API access
-      // Stop is a no-op since global teardown handles cleanup
+      server: fullInstance?.server || null,
+      debugLogPath: debugLogPath,
       stop: async () => {
         // No-op - cleanup is handled in global teardown
       },
