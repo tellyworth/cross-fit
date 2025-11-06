@@ -81,6 +81,29 @@ function big_mistake_trigger_errors() {
 // Hook early to catch all errors
 add_action('init', 'big_mistake_trigger_errors', 1);
 
+/**
+ * Trigger an HTTP request during page rendering for testing
+ * This allows us to verify HTTP timeout errors appear in page content
+ */
+function big_mistake_test_http_request() {
+  // Check for trigger via GET parameter
+  $test_http = isset($_GET['test_http_timeout']) || isset($_SERVER['HTTP_X_TEST_HTTP_TIMEOUT']);
+
+  if ($test_http) {
+    // Make an external HTTP request that will timeout with our 0.1s timeout
+    // This happens during page rendering, so errors will appear in page content
+    $response = wp_remote_get('https://api.wordpress.org/core/version-check/1.7/', array(
+      'timeout' => 0.1,
+      'connect_timeout' => 0.1,
+    ));
+
+    // The http_response filter will trigger an error if timeout occurs
+    // We don't need to do anything else here - the filter handles it
+  }
+}
+
+add_action('wp_head', 'big_mistake_test_http_request', 1);
+
 
 /**
  * Disable dashboard widgets that fetch external RSS feeds
@@ -114,25 +137,20 @@ function big_mistake_reduce_http_timeout($args, $url) {
 
 add_filter('http_request_args', 'big_mistake_reduce_http_timeout', 999, 2);
 
+
 /**
- * Trigger PHP errors when HTTP requests fail due to timeout
- * This ensures failed requests are visible in WP_DEBUG_DISPLAY output
+ * Catch failed HTTP requests (including timeouts) and surface as PHP warnings
+ * http_api_debug runs for both successful responses and WP_Error
  */
-function big_mistake_trigger_http_error($response, $args, $url) {
+add_action('http_api_debug', function($response, $context, $class, $args, $url) {
   if (is_wp_error($response)) {
     $error_message = $response->get_error_message();
-    // Check if error is timeout-related (connection timeout, request timeout, etc.)
-    if (stripos($error_message, 'timeout') !== false ||
-        stripos($error_message, 'timed out') !== false) {
+    if (stripos($error_message, 'timeout') !== false || stripos($error_message, 'timed out') !== false) {
       trigger_error(
         sprintf('HTTP request failed: %s (URL: %s)', $error_message, $url),
         E_USER_WARNING
       );
     }
   }
-
-  return $response;
-}
-
-add_filter('http_response', 'big_mistake_trigger_http_error', 10, 3);
+}, 10, 5);
 
