@@ -154,3 +154,17 @@ add_action('http_api_debug', function($response, $context, $class, $args, $url) 
   }
 }, 10, 5);
 
+/**
+ * Hard-block requests to api.wordpress.org to avoid slow update checks entirely
+ */
+function big_mistake_block_api_wordpress_org($preempt, $args, $url) {
+  $host = parse_url($url, PHP_URL_HOST);
+  if ($host && preg_match('/(^|\\.)api\\.wordpress\\.org$/i', $host)) {
+    return new WP_Error('blocked_api_wordpress_org', 'Blocked api.wordpress.org during tests');
+  }
+  return $preempt;
+}
+
+add_filter('pre_http_request', 'big_mistake_block_api_wordpress_org', 999, 3);
+
+

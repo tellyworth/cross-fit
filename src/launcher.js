@@ -75,6 +75,10 @@ export async function launchWordPress() {
           WP_DEBUG: true,
           WP_DEBUG_DISPLAY: true,
           WP_DEBUG_LOG: true,
+          // Disable automatic updates to avoid external requests
+          AUTOMATIC_UPDATER_DISABLED: true,
+          WP_AUTO_UPDATE_CORE: false,
+          DISALLOW_FILE_MODS: true,
         },
       },
     ];
