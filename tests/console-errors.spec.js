@@ -32,10 +32,7 @@ test.describe('Console Error Detection', { tag: '@internal' }, () => {
 
     // Use Big Mistake plugin to trigger console error via GET parameter
     const baseUrl = wpInstance.url.replace(/\/$/, '');
-    await page.goto(`${baseUrl}/?trigger_js_error=1&js_error_type=console`, { waitUntil: 'networkidle' });
-
-    // Wait for page to load and errors to be captured
-    await page.waitForLoadState('networkidle');
+    await page.goto(`${baseUrl}/?trigger_js_error=1&js_error_type=console`, { waitUntil: 'load' });
     await page.waitForTimeout(300);
 
     // Verify we captured the console errors
@@ -58,10 +55,7 @@ test.describe('Console Error Detection', { tag: '@internal' }, () => {
 
     // Use Big Mistake plugin to trigger uncaught exception via GET parameter
     const baseUrl = wpInstance.url.replace(/\/$/, '');
-    await page.goto(`${baseUrl}/?trigger_js_error=1&js_error_type=exception`, { waitUntil: 'networkidle' });
-
-    // Wait for page to load and errors to be captured
-    await page.waitForLoadState('networkidle');
+    await page.goto(`${baseUrl}/?trigger_js_error=1&js_error_type=exception`, { waitUntil: 'load' });
     await page.waitForTimeout(300);
 
     // Verify we captured the page error

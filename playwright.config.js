@@ -41,9 +41,9 @@ export default defineConfig({
     navigationTimeout: process.env.PW_NAV_TIMEOUT ? parseInt(process.env.PW_NAV_TIMEOUT, 10) : undefined,
   },
   // Timeout settings
-  timeout: 30000, // 30 seconds per test
+  timeout: 20000, // 20 seconds per test (reduced from 30s for faster feedback)
   expect: {
-    timeout: 5000, // 5 seconds for assertions
+    timeout: 3000, // 3 seconds for assertions (reduced from 5s)
   },
 });
 

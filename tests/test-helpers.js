@@ -184,6 +184,7 @@ export async function testWordPressPage(page, wpInstance, path, options = {}) {
     allowPageErrors = false,
     allowPHPErrors = false,
     description = null,
+    waitUntil = 'load', // Allow override for tests that need networkidle
   } = options;
 
   // Track errors - set up listeners before navigation
@@ -207,12 +208,11 @@ export async function testWordPressPage(page, wpInstance, path, options = {}) {
   });
 
   // Navigate and check response
-  const response = await page.goto(url, { waitUntil: 'networkidle' });
+  // Use 'load' by default for faster tests (networkidle waits 500ms for no activity)
+  // Some tests may need 'networkidle' to capture errors that occur during network activity
+  const response = await page.goto(url, { waitUntil });
 
   expect(response.status()).toBe(expectedStatus);
-
-  // Wait for page to fully load
-  await page.waitForLoadState('networkidle');
 
   // Detect PHP errors in page content (when WP_DEBUG_DISPLAY is enabled)
   const pageContent = await page.content();
@@ -320,7 +320,7 @@ export async function testWordPressPages(page, wpInstance, pages, defaultOptions
  */
 export async function testWordPressRSSFeed(page, wpInstance, path, options = {}) {
   const feedUrl = normalizePath(wpInstance.url, path);
-  const response = await page.goto(feedUrl, { waitUntil: 'networkidle' });
+  const response = await page.goto(feedUrl, { waitUntil: 'load' });
 
   expect(response.status()).toBe(200);
 
@@ -428,10 +428,10 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
   // This is more reliable than waiting for DOMContentLoaded since admin JS is heavy
   // External dashboard feed widgets are disabled via plugin to prevent server-side timeouts
   await Promise.race([
-    page.waitForSelector('#wpadminbar', { timeout: 10000 }),
-    page.waitForSelector('#adminmenumain', { timeout: 10000 }),
-    page.waitForSelector('body.wp-admin', { timeout: 10000 }),
-    page.waitForSelector('#wpbody-content', { timeout: 10000 }),
+    page.waitForSelector('#wpadminbar', { timeout: 5000 }),
+    page.waitForSelector('#adminmenumain', { timeout: 5000 }),
+    page.waitForSelector('body.wp-admin', { timeout: 5000 }),
+    page.waitForSelector('#wpbody-content', { timeout: 5000 }),
   ]).catch(() => {
     // If none found, continue - we'll check below
   });

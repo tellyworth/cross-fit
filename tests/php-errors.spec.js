@@ -13,7 +13,7 @@ test.describe('PHP Error Detection', { tag: '@internal' }, () => {
   test('should detect PHP notice via Big Mistake plugin', async ({ page, wpInstance }) => {
     // Use Big Mistake plugin to trigger a PHP notice via GET parameter
     const baseUrl = wpInstance.url.replace(/\/$/, '');
-    await page.goto(`${baseUrl}/?trigger_php_error=notice`, { waitUntil: 'networkidle' });
+    await page.goto(`${baseUrl}/?trigger_php_error=notice`, { waitUntil: 'load' });
     const pageContent = await page.content();
     const phpErrors = detectPHPErrors(pageContent);
 
@@ -29,7 +29,7 @@ test.describe('PHP Error Detection', { tag: '@internal' }, () => {
   test('should detect PHP warning via Big Mistake plugin', async ({ page, wpInstance }) => {
     // Use Big Mistake plugin to trigger a PHP warning via GET parameter
     const baseUrl = wpInstance.url.replace(/\/$/, '');
-    await page.goto(`${baseUrl}/?trigger_php_error=warning`, { waitUntil: 'networkidle' });
+    await page.goto(`${baseUrl}/?trigger_php_error=warning`, { waitUntil: 'load' });
     const pageContent = await page.content();
     const phpErrors = detectPHPErrors(pageContent);
 
@@ -46,7 +46,7 @@ test.describe('PHP Error Detection', { tag: '@internal' }, () => {
       'X-Trigger-PHP-Error': 'notice',
     });
 
-    await page.goto(wpInstance.url, { waitUntil: 'networkidle' });
+    await page.goto(wpInstance.url, { waitUntil: 'load' });
     const pageContent = await page.content();
     const phpErrors = detectPHPErrors(pageContent);
 

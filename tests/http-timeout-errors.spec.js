@@ -14,6 +14,8 @@ test.describe('HTTP Timeout Error Detection', { tag: '@internal' }, () => {
     // Use Big Mistake plugin to trigger an HTTP request that will timeout
     // during page rendering, ensuring the error appears in page content
     const baseUrl = wpInstance.url.replace(/\/$/, '');
+    // Use networkidle for this test to ensure HTTP timeout errors are captured
+    // The HTTP request happens during wp_head, so we need to wait for it to complete
     await page.goto(`${baseUrl}/?test_http_timeout=1`, { waitUntil: 'networkidle' });
 
     const pageContent = await page.content();
@@ -38,8 +40,10 @@ test.describe('HTTP Timeout Error Detection', { tag: '@internal' }, () => {
     });
 
     // Use the helper which automatically detects PHP errors
+    // Use networkidle to ensure HTTP timeout errors are captured in page content
     const result = await testWordPressPage(page, wpInstance, '/', {
       allowPHPErrors: true, // Allow PHP errors for this test (won't fail on detection)
+      waitUntil: 'networkidle', // Wait for network activity to complete (including HTTP timeout)
       description: 'Testing HTTP timeout error detection with helper',
     });
 

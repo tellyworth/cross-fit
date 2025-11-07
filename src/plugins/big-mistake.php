@@ -91,14 +91,15 @@ function big_mistake_test_http_request() {
 
   if ($test_http) {
     // Make an external HTTP request that will timeout with our 0.1s timeout
+    // Use a URL that isn't blocked by pre_http_request filter (not api.wordpress.org)
     // This happens during page rendering, so errors will appear in page content
-    $response = wp_remote_get('https://api.wordpress.org/core/version-check/1.7/', array(
+    $response = wp_remote_get('https://httpbin.org/delay/1', array(
       'timeout' => 0.1,
       'connect_timeout' => 0.1,
     ));
 
-    // The http_response filter will trigger an error if timeout occurs
-    // We don't need to do anything else here - the filter handles it
+    // The http_api_debug action will trigger an error if timeout occurs
+    // We don't need to do anything else here - the action handles it
   }
 }
 
