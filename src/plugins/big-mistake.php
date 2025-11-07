@@ -1,10 +1,15 @@
 <?php
 /**
  * Plugin Name: Big Mistake
- * Description: Helper plugin for testing error detection in WordPress E2E tests
+ * Description: Helper plugin for testing error detection in WordPress E2E tests; NOT FOR USE ON PRODUCTION SITES.
  * Version: 1.0.0
  * Author: Cross-Fit Testing Tool
  */
+
+ /**
+  * This plugin is intended only for use in local testing environments.
+  * It is of no use outside of e2e testing and will break production sites.
+  */
 
 /**
  * Trigger PHP errors based on request parameters or headers
