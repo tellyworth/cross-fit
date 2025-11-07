@@ -19,6 +19,9 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   // By default, exclude internal self-tests unless explicitly included
   // Set INCLUDE_INTERNAL=1 to run @internal tests
+  grep: (process.env.INCLUDE_INTERNAL === '1' || process.env.INCLUDE_INTERNAL === 'true')
+    ? /@internal/
+    : undefined,
   grepInvert: (process.env.INCLUDE_INTERNAL === '1' || process.env.INCLUDE_INTERNAL === 'true')
     ? undefined
     : /@internal/,
