@@ -138,6 +138,7 @@ export async function readDebugLog(wpInstance, options = {}) {
 
     return null;
   } catch (e) {
+    console.error(`[readDebugLog] Error reading debug log at "${wpInstance?.debugLogPath}":`, e);
     return null;
   }
 }
@@ -394,32 +395,43 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
   // Admin pages have heavy JS that can delay DOMContentLoaded indefinitely
   // We wait for actual UI elements instead of DOMContentLoaded
   let response;
-  try {
-    // Use 'commit' which waits for navigation to start (much faster)
-    response = await page.goto(url, { waitUntil: 'commit', timeout: 30000 });
-  } catch (e) {
-    if (page.isClosed()) {
-      throw new Error('Page was closed during navigation');
-    }
-    if (String(e.message || '').includes('ERR_ABORTED') || String(e.message || '').includes('Target page')) {
-      // Wait a bit and retry
-      await page.waitForTimeout(500);
+  /**
+   * Helper to navigate with retry logic.
+   * @param {object} page - Playwright page object
+   * @param {string} url - URL to navigate to
+   * @param {number} [retryDelayMs=500] - Delay before retrying navigation (default: 500ms, empirically chosen for WP admin JS load)
+   * @returns {Promise<Response>} - Playwright Response object
+   */
+  async function navigateWithRetry(page, url, retryDelayMs = 500) {
+    try {
+      // Use 'commit' which waits for navigation to start (much faster)
+      return await page.goto(url, { waitUntil: 'commit', timeout: 30000 });
+    } catch (e) {
       if (page.isClosed()) {
-        throw new Error('Page was closed after navigation error');
+        throw new Error('Page was closed during navigation');
       }
-      try {
-        response = await page.goto(url, { waitUntil: 'commit', timeout: 30000 });
-      } catch (retryError) {
+      if (String(e.message || '').includes('ERR_ABORTED') || String(e.message || '').includes('Target page')) {
+        // Wait a bit and retry
+        await page.waitForTimeout(retryDelayMs);
         if (page.isClosed()) {
-          throw new Error('Page was closed during retry navigation');
+          throw new Error('Page was closed after navigation error');
         }
-        throw retryError;
+        try {
+          return await page.goto(url, { waitUntil: 'commit', timeout: 30000 });
+        } catch (retryError) {
+          if (page.isClosed()) {
+            throw new Error('Page was closed during retry navigation');
+          }
+          throw retryError;
+        }
+      } else {
+        throw e;
       }
-    } else {
-      throw e;
     }
   }
 
+  // Use helper with default retry delay (configurable)
+  response = await navigateWithRetry(page, url);
   if (response) {
     expect(response.status()).toBe(200);
   }
@@ -443,8 +455,9 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
       const pageContent = await page.content();
       phpErrors = detectPHPErrors(pageContent);
     }
-  } catch {
-    // frame may have been replaced; ignore
+  } catch (err) {
+    // frame may have been replaced; log error for debugging
+    console.warn('Error while getting page content or detecting PHP errors:', err);
   }
 
   // Check for admin-specific elements
