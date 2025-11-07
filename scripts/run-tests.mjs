@@ -38,11 +38,25 @@ async function main() {
     // Do not forward --blueprint to Playwright
   }
 
+  if (options.debugLog || options['debug-log']) {
+    env.WP_DEBUG_LOG_LINES = options.debugLog || options['debug-log'];
+    // Do not forward --debug-log to Playwright
+  }
+
+  // Forward all other options to Playwright (e.g., --grep, --grep-invert, etc.)
+  const forwardedArgs = [...passthrough];
+  for (const [key, value] of Object.entries(options)) {
+    // Skip custom options that we handle ourselves
+    if (key !== 'blueprint' && key !== 'debugLog' && key !== 'debug-log') {
+      forwardedArgs.push(`--${key}=${value}`);
+    }
+  }
+
   // Future options (examples, not implemented):
   // if (options.plugins) env.WP_PLUGINS = options.plugins;
   // if (options.baseline) env.BASELINE = '1';
 
-  const pwArgs = ['playwright', 'test', ...passthrough];
+  const pwArgs = ['playwright', 'test', ...forwardedArgs];
 
   const child = spawn(process.platform === 'win32' ? 'npx.cmd' : 'npx', pwArgs, {
     stdio: 'inherit',

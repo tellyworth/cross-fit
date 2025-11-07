@@ -1,4 +1,5 @@
 import { expect } from '@playwright/test';
+import { readFileSync, existsSync } from 'fs';
 
 /**
  * Reusable test helpers for WordPress E2E testing
@@ -101,10 +102,48 @@ export function detectPHPErrors(htmlContent) {
 }
 
 /**
- * Determine PHP error type from error text
- * @param {string} errorText - Raw error text
- * @returns {string} Error type (fatal, parse, warning, notice, etc.)
+ * Read WordPress debug log from Playground filesystem
+ *
+ * @param {Object} wpInstance - WordPress instance with server property
+ * @param {Object} options - Optional options
+ * @param {string} options.filter - Filter log lines by this string (e.g., '[Big Mistake]')
+ * @param {number} options.limit - Maximum number of lines to return (default: 50)
+ * @returns {Promise<string>} - Debug log content (filtered if specified)
  */
+export async function readDebugLog(wpInstance, options = {}) {
+  const { filter = null, limit = 50 } = options;
+
+  if (!wpInstance?.debugLogPath) {
+    return null;
+  }
+
+  try {
+    if (!existsSync(wpInstance.debugLogPath)) {
+      return null;
+    }
+
+    const logContent = readFileSync(wpInstance.debugLogPath, 'utf8');
+    const lines = logContent.split('\n').filter(line => line.trim());
+
+    let filteredLines = lines;
+    if (filter) {
+      filteredLines = lines.filter(line => line.includes(filter));
+    }
+
+    const selectedLines = filteredLines.slice(-limit);
+
+    if (selectedLines.length > 0) {
+      return selectedLines.join('\n');
+    }
+
+    return null;
+  } catch (e) {
+    console.error(`[readDebugLog] Error reading debug log at "${wpInstance?.debugLogPath}":`, e);
+    return null;
+  }
+}
+
+
 function detectErrorType(errorText) {
   const lowerText = errorText.toLowerCase();
   if (lowerText.includes('fatal error')) return 'fatal';
@@ -146,6 +185,7 @@ export async function testWordPressPage(page, wpInstance, path, options = {}) {
     allowPageErrors = false,
     allowPHPErrors = false,
     description = null,
+    waitUntil = 'load', // Allow override for tests that need networkidle
   } = options;
 
   // Track errors - set up listeners before navigation
@@ -169,12 +209,11 @@ export async function testWordPressPage(page, wpInstance, path, options = {}) {
   });
 
   // Navigate and check response
-  const response = await page.goto(url, { waitUntil: 'networkidle' });
+  // Use 'load' by default for faster tests (networkidle waits 500ms for no activity)
+  // Some tests may need 'networkidle' to capture errors that occur during network activity
+  const response = await page.goto(url, { waitUntil });
 
   expect(response.status()).toBe(expectedStatus);
-
-  // Wait for page to fully load
-  await page.waitForLoadState('networkidle');
 
   // Detect PHP errors in page content (when WP_DEBUG_DISPLAY is enabled)
   const pageContent = await page.content();
@@ -282,7 +321,7 @@ export async function testWordPressPages(page, wpInstance, pages, defaultOptions
  */
 export async function testWordPressRSSFeed(page, wpInstance, path, options = {}) {
   const feedUrl = normalizePath(wpInstance.url, path);
-  const response = await page.goto(feedUrl, { waitUntil: 'networkidle' });
+  const response = await page.goto(feedUrl, { waitUntil: 'load' });
 
   expect(response.status()).toBe(200);
 
@@ -346,27 +385,80 @@ export async function testWordPressRSSFeed(page, wpInstance, path, options = {})
 export async function testWordPressAdminPage(page, wpInstance, path, options = {}) {
   const url = normalizePath(wpInstance.url, path);
 
-  // Navigate to the page - use 'commit' to wait for navigation to start
-  // This is faster and more reliable than waiting for DOMContentLoaded
-  const response = await page.goto(url, { waitUntil: 'commit' });
+  // Check if page is already closed
+  if (page.isClosed()) {
+    throw new Error('Page was closed before navigation');
+  }
 
-  expect(response.status()).toBe(200);
 
-  // Wait for specific admin elements - this is more reliable than waiting for load events
-  // Admin pages load JavaScript after DOMContentLoaded, so we wait for actual UI elements
-  // Use a longer timeout to account for slower pages
+  // For admin pages, use 'commit' to start navigation quickly, then wait for elements
+  // Admin pages have heavy JS that can delay DOMContentLoaded indefinitely
+  // We wait for actual UI elements instead of DOMContentLoaded
+  let response;
+  /**
+   * Helper to navigate with retry logic.
+   * @param {object} page - Playwright page object
+   * @param {string} url - URL to navigate to
+   * @param {number} [retryDelayMs=500] - Delay before retrying navigation (default: 500ms, empirically chosen for WP admin JS load)
+   * @returns {Promise<Response>} - Playwright Response object
+   */
+  async function navigateWithRetry(page, url, retryDelayMs = 500) {
+    try {
+      // Use 'commit' which waits for navigation to start (much faster)
+      return await page.goto(url, { waitUntil: 'commit', timeout: 30000 });
+    } catch (e) {
+      if (page.isClosed()) {
+        throw new Error('Page was closed during navigation');
+      }
+      if (String(e.message || '').includes('ERR_ABORTED') || String(e.message || '').includes('Target page')) {
+        // Wait a bit and retry
+        await page.waitForTimeout(retryDelayMs);
+        if (page.isClosed()) {
+          throw new Error('Page was closed after navigation error');
+        }
+        try {
+          return await page.goto(url, { waitUntil: 'commit', timeout: 30000 });
+        } catch (retryError) {
+          if (page.isClosed()) {
+            throw new Error('Page was closed during retry navigation');
+          }
+          throw retryError;
+        }
+      } else {
+        throw e;
+      }
+    }
+  }
+
+  // Use helper with default retry delay (configurable)
+  response = await navigateWithRetry(page, url);
+  if (response) {
+    expect(response.status()).toBe(200);
+  }
+
+  // Wait for admin UI elements to confirm page is ready
+  // This is more reliable than waiting for DOMContentLoaded since admin JS is heavy
+  // External dashboard feed widgets are disabled via plugin to prevent server-side timeouts
   await Promise.race([
-    page.waitForSelector('#wpadminbar', { timeout: 15000 }),
-    page.waitForSelector('#adminmenumain', { timeout: 15000 }),
-    page.waitForSelector('body.wp-admin', { timeout: 15000 }),
-    page.waitForSelector('#wpbody-content', { timeout: 15000 }),
+    page.waitForSelector('#wpadminbar', { timeout: 5000 }),
+    page.waitForSelector('#adminmenumain', { timeout: 5000 }),
+    page.waitForSelector('body.wp-admin', { timeout: 5000 }),
+    page.waitForSelector('#wpbody-content', { timeout: 5000 }),
   ]).catch(() => {
     // If none found, continue - we'll check below
   });
 
   // Detect PHP errors in page content (when WP_DEBUG_DISPLAY is enabled)
-  const pageContent = await page.content();
-  const phpErrors = detectPHPErrors(pageContent);
+  let phpErrors = [];
+  try {
+    if (!page.isClosed()) {
+      const pageContent = await page.content();
+      phpErrors = detectPHPErrors(pageContent);
+    }
+  } catch (err) {
+    // frame may have been replaced; log error for debugging
+    console.warn('Error while getting page content or detecting PHP errors:', err);
+  }
 
   // Check for admin-specific elements
   const adminCheck = await page.evaluate(() => {
