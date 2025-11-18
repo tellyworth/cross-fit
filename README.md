@@ -48,6 +48,23 @@ WP_BLUEPRINT=./path/to/blueprint.json npm test
 
 The provided blueprint is merged with our base debug step (WP_DEBUG, WP_DEBUG_DISPLAY, WP_DEBUG_LOG), which is prepended to ensure PHP errors are visible in rendered pages.
 
+#### Installing themes and plugins, and importing content
+
+```bash
+# Import a WXR file
+npm test -- --import=./path/to/export.xml
+npm test -- --import=https://example.com/export.xml
+
+# Install and activate a theme
+npm test -- --theme=twentytwentyfour
+
+# Install and activate plugins (single or multiple)
+npm test -- --plugin=akismet
+npm test -- --plugin=akismet,jetpack,woocommerce
+
+# Combine all options
+npm test -- --import=./export.xml --theme=twentytwentyfour --plugin=akismet,jetpack
+```
 
 #### Running All Tests
 

@@ -1,7 +1,7 @@
 import { runCLI } from '@wp-playground/cli';
-import { readFileSync, mkdtempSync } from 'fs';
+import { readFileSync, mkdtempSync, existsSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { dirname, join, resolve } from 'path';
 import { tmpdir } from 'os';
 
 async function resolveBlueprintFromArg(arg) {
@@ -29,7 +29,86 @@ function extractBlueprintArgFromProcess() {
   if (argvArg) return argvArg.split('=')[1];
   return null;
 }
-// (imports defined at top)
+
+/**
+ * Build blueprint steps from CLI arguments
+ * Returns an array of blueprint steps
+ */
+function buildCliBlueprintSteps() {
+  const steps = [];
+
+  // Handle WXR import
+  const importArg = process.env.WP_IMPORT;
+  if (importArg) {
+    // Determine if it's a URL or local file path
+    const isUrl = /^https?:\/\//i.test(importArg);
+    if (isUrl) {
+      steps.push({
+        step: 'importWxr',
+        file: {
+          resource: 'url',
+          url: importArg,
+        },
+      });
+    } else {
+      // Local file path - read the file and provide as literal resource
+      try {
+        const filePath = resolve(importArg);
+        if (!existsSync(filePath)) {
+          console.warn(`Warning: WXR file not found: ${filePath}`);
+        } else {
+          const fileContent = readFileSync(filePath, 'utf8');
+          const fileName = filePath.split('/').pop() || 'import.wxr';
+          steps.push({
+            step: 'importWxr',
+            file: {
+              resource: 'literal',
+              name: fileName,
+              contents: fileContent,
+            },
+          });
+        }
+      } catch (error) {
+        console.warn(`Warning: Could not read WXR file ${importArg}:`, error.message);
+      }
+    }
+  }
+
+  // Handle theme installation and activation
+  const themeArg = process.env.WP_THEME;
+  if (themeArg) {
+    steps.push({
+      step: 'installTheme',
+      themeData: {
+        resource: 'wordpress.org/themes',
+        slug: themeArg,
+      },
+      options: {
+        activate: true,
+      },
+    });
+  }
+
+  // Handle plugin installation and activation (comma-separated)
+  const pluginsArg = process.env.WP_PLUGINS;
+  if (pluginsArg) {
+    const pluginSlugs = pluginsArg.split(',').map(s => s.trim()).filter(s => s);
+    for (const pluginSlug of pluginSlugs) {
+      steps.push({
+        step: 'installPlugin',
+        pluginData: {
+          resource: 'wordpress.org/plugins',
+          slug: pluginSlug,
+        },
+        options: {
+          activate: true,
+        },
+      });
+    }
+  }
+
+  return steps;
+}
 
 /**
  * Normalize URL to always use 127.0.0.1 instead of localhost
@@ -82,15 +161,16 @@ export async function launchWordPress() {
       },
     ];
 
-    // Merge user blueprint if provided: prepend our base steps
-    const finalBlueprint = userBlueprint
-      ? {
-          ...userBlueprint,
-          steps: Array.isArray(userBlueprint.steps)
-            ? [...baseSteps, ...userBlueprint.steps]
-            : baseSteps,
-        }
-      : { steps: baseSteps };
+    // Build steps from CLI arguments (import, theme, plugins)
+    const cliSteps = buildCliBlueprintSteps();
+
+    // Combine all steps: base steps first, then CLI steps, then user blueprint steps
+    const allSteps = [...baseSteps, ...cliSteps];
+    if (userBlueprint && Array.isArray(userBlueprint.steps)) {
+      allSteps.push(...userBlueprint.steps);
+    }
+
+    const finalBlueprint = { steps: allSteps };
 
     // Mount our temp directory to /wordpress before installation
     // This ensures WordPress files (including debug.log) are stored in our known directory
@@ -111,6 +191,19 @@ export async function launchWordPress() {
     });
 
     console.log('✓ Enabled WP_DEBUG, WP_DEBUG_DISPLAY, and WP_DEBUG_LOG via blueprint');
+
+    // Log CLI argument actions
+    if (process.env.WP_IMPORT) {
+      console.log(`✓ Will import WXR file: ${process.env.WP_IMPORT}`);
+    }
+    if (process.env.WP_THEME) {
+      console.log(`✓ Will install and activate theme: ${process.env.WP_THEME}`);
+    }
+    if (process.env.WP_PLUGINS) {
+      const plugins = process.env.WP_PLUGINS.split(',').map(s => s.trim()).filter(s => s);
+      console.log(`✓ Will install and activate plugins: ${plugins.join(', ')}`);
+    }
+
     if (blueprintArg) {
       console.log(`✓ Applied user blueprint from ${blueprintArg}`);
     }
