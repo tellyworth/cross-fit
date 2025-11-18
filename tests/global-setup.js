@@ -1,4 +1,9 @@
 import { launchWordPress } from '../src/launcher.js';
+import {
+  discoverPostTypesFetch,
+  discoverListPageTypesFetch,
+  discoverAdminMenuItems,
+} from './test-helpers.js';
 
 /**
  * Global setup for Playwright tests
@@ -27,6 +32,17 @@ async function globalSetup() {
   global.wpInstance = wpInstance;
 
   console.log(`Global setup: WordPress ready at ${wpInstance.url}`);
+
+  // Initialize discovered data structure - will be populated lazily in tests
+  // Discovery happens in tests using page.request which works correctly
+  // (Node.js fetch has issues with redirects in Playground environment)
+  global.wpDiscoveredData = {
+    postTypes: null, // Will be discovered lazily in first test that needs it
+    listPageTypes: null, // Will be discovered lazily in first test that needs it
+    adminMenuItems: null, // Will be discovered lazily in first test that needs it
+  };
+
+  console.log('Global setup: WordPress data will be discovered lazily in tests (using Playwright page.request)');
 
   // Return the instance for teardown
   return wpInstance;

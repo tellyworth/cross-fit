@@ -58,14 +58,21 @@ async function main() {
     // Do not forward --plugin to Playwright
   }
 
+  // Handle FULL_MODE flag
+  if (options.full || options.fullMode || process.env.FULL_MODE === '1') {
+    env.FULL_MODE = '1';
+    // Do not forward --full to Playwright
+  }
+
   // Forward all other options to Playwright (e.g., --grep, --grep-invert, etc.)
   const forwardedArgs = [...passthrough];
   for (const [key, value] of Object.entries(options)) {
-    // Skip custom options that we handle ourselves
-    if (key !== 'blueprint' && key !== 'debugLog' && key !== 'debug-log' &&
-        key !== 'import' && key !== 'theme' && key !== 'plugin') {
-      forwardedArgs.push(`--${key}=${value}`);
-    }
+      // Skip custom options that we handle ourselves
+      if (key !== 'blueprint' && key !== 'debugLog' && key !== 'debug-log' &&
+          key !== 'import' && key !== 'theme' && key !== 'plugin' &&
+          key !== 'full' && key !== 'fullMode') {
+        forwardedArgs.push(`--${key}=${value}`);
+      }
   }
 
   // Future options (examples, not implemented):

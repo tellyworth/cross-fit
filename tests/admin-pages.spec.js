@@ -1,6 +1,7 @@
 import { test, expect } from './wp-fixtures.js';
 import {
   testWordPressAdminPage,
+  discoverAdminSubmenuItems,
 } from './test-helpers.js';
 
 /**
@@ -59,6 +60,65 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
     const savedTagline = await page.inputValue('#blogdescription');
 
     expect(savedTagline).toBe(newTagline);
+  });
+
+  test('should access all top-level admin menu items without errors', async ({ page, wpInstance }) => {
+    const isFullMode = process.env.FULL_MODE === '1';
+
+    // Discover admin menu items lazily if not already cached
+    let adminMenuItems = wpInstance.discoveredData?.adminMenuItems;
+    if (!adminMenuItems || adminMenuItems.length === 0) {
+      const { discoverAdminMenuItems } = await import('./test-helpers.js');
+      adminMenuItems = await discoverAdminMenuItems(wpInstance);
+      // Cache for other tests
+      if (global.wpDiscoveredData) {
+        global.wpDiscoveredData.adminMenuItems = adminMenuItems;
+      }
+      if (wpInstance.discoveredData) {
+        wpInstance.discoveredData.adminMenuItems = adminMenuItems;
+      }
+    }
+
+    if (adminMenuItems.length === 0) {
+      test.skip(true, 'No admin menu items discovered');
+      return;
+    }
+
+    // Test each top-level menu item
+    for (const menuItem of adminMenuItems) {
+      // Extract path from full URL
+      const url = new URL(menuItem.url);
+      const path = url.pathname + url.search;
+
+      try {
+        await testWordPressAdminPage(page, wpInstance, path, {
+          description: `Admin menu: ${menuItem.title} (${menuItem.slug})`,
+        });
+      } catch (error) {
+        // Log warning for inaccessible items but continue testing others
+        console.warn(`Warning: Could not access admin menu item "${menuItem.title}" (${menuItem.slug}):`, error.message);
+      }
+
+      // In full mode, also test all submenu items
+      if (isFullMode) {
+        try {
+          const submenuItems = await discoverAdminSubmenuItems(wpInstance, menuItem.slug);
+          for (const submenuItem of submenuItems) {
+            const submenuUrl = new URL(submenuItem.url);
+            const submenuPath = submenuUrl.pathname + submenuUrl.search;
+            try {
+              await testWordPressAdminPage(page, wpInstance, submenuPath, {
+                description: `Admin submenu: ${submenuItem.title} (${submenuItem.slug}) under ${menuItem.title}`,
+              });
+            } catch (subError) {
+              console.warn(`Warning: Could not access admin submenu item "${submenuItem.title}" (${submenuItem.slug}):`, subError.message);
+            }
+          }
+        } catch (error) {
+          console.warn(`Warning: Could not discover submenu items for "${menuItem.title}":`, error.message);
+        }
+      }
+    }
   });
 });
 

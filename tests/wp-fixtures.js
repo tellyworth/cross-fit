@@ -31,6 +31,11 @@ export const test = base.extend({
       url: wpUrl,
       server: fullInstance?.server || null,
       debugLogPath: debugLogPath,
+      discoveredData: global.wpDiscoveredData || {
+        postTypes: null,
+        listPageTypes: null,
+        adminMenuItems: null,
+      },
       stop: async () => {
         // No-op - cleanup is handled in global teardown
       },
