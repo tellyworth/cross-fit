@@ -1,5 +1,5 @@
 import { runCLI } from '@wp-playground/cli';
-import { readFileSync, mkdtempSync, existsSync } from 'fs';
+import { readFileSync, mkdtempSync, existsSync, copyFileSync, mkdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join, resolve } from 'path';
 import { tmpdir } from 'os';
@@ -33,8 +33,9 @@ function extractBlueprintArgFromProcess() {
 /**
  * Build blueprint steps from CLI arguments
  * Returns an array of blueprint steps
+ * @param {string} tempDir - Path to the temp directory mounted to /wordpress in VFS
  */
-function buildCliBlueprintSteps() {
+function buildCliBlueprintSteps(tempDir) {
   const steps = [];
 
   // Handle WXR import
@@ -77,29 +78,11 @@ function buildCliBlueprintSteps() {
   // Handle theme installation and activation
   const themeArg = process.env.WP_THEME;
   if (themeArg) {
-    steps.push({
-      step: 'installTheme',
-      themeData: {
-        resource: 'wordpress.org/themes',
-        slug: themeArg,
-      },
-      options: {
-        activate: true,
-      },
-    });
-  }
-
-  // Handle plugin installation and activation (comma-separated)
-  const pluginsArg = process.env.WP_PLUGINS;
-  if (pluginsArg) {
-    const pluginSlugs = pluginsArg.split(',').map(s => s.trim()).filter(s => s);
-    for (const pluginSlug of pluginSlugs) {
+    const themeResource = resolveThemeOrPluginResource(themeArg, 'theme', tempDir);
+    if (themeResource) {
       steps.push({
-        step: 'installPlugin',
-        pluginData: {
-          resource: 'wordpress.org/plugins',
-          slug: pluginSlug,
-        },
+        step: 'installTheme',
+        themeData: themeResource,
         options: {
           activate: true,
         },
@@ -107,7 +90,77 @@ function buildCliBlueprintSteps() {
     }
   }
 
+  // Handle plugin installation and activation (comma-separated)
+  const pluginsArg = process.env.WP_PLUGINS;
+  if (pluginsArg) {
+    const pluginSlugs = pluginsArg.split(',').map(s => s.trim()).filter(s => s);
+    for (const pluginSlug of pluginSlugs) {
+      const pluginResource = resolveThemeOrPluginResource(pluginSlug, 'plugin', tempDir);
+      if (pluginResource) {
+        steps.push({
+          step: 'installPlugin',
+          pluginData: pluginResource,
+          options: {
+            activate: true,
+          },
+        });
+      }
+    }
+  }
+
   return steps;
+}
+
+/**
+ * Resolve a theme or plugin resource from a slug, URL, or local file path
+ * For local files, copies them to the temp directory which is mounted to /wordpress in VFS
+ * @param {string} arg - The slug, URL, or file path
+ * @param {string} type - Either 'theme' or 'plugin' to determine wordpress.org resource type
+ * @param {string} tempDir - Path to the temp directory mounted to /wordpress in VFS
+ * @returns {Object|null} Resource object for use in installTheme/installPlugin steps, or null if invalid
+ */
+function resolveThemeOrPluginResource(arg, type, tempDir) {
+  // Check if it's a URL
+  if (/^https?:\/\//i.test(arg)) {
+    return {
+      resource: 'url',
+      url: arg,
+    };
+  }
+
+  // Check if it's a local file path
+  try {
+    const filePath = resolve(arg);
+    if (existsSync(filePath)) {
+      // Ensure tmp directory exists in the temp dir
+      const tmpDir = join(tempDir, 'tmp');
+      if (!existsSync(tmpDir)) {
+        mkdirSync(tmpDir, { recursive: true });
+      }
+
+      // Copy file to temp directory with unique name
+      const fileName = filePath.split('/').pop() || filePath.split('\\').pop() || `${type}.zip`;
+      const destPath = join(tmpDir, `${Date.now()}-${fileName}`);
+      copyFileSync(filePath, destPath);
+
+      // Reference via VFS (tempDir is mounted to /wordpress)
+      const vfsPath = `/wordpress/tmp/${destPath.split('/').pop() || destPath.split('\\').pop()}`;
+      return {
+        resource: 'vfs',
+        path: vfsPath,
+      };
+    }
+  } catch (error) {
+    console.warn(`Warning: Could not copy ${type} file ${arg} to temp directory:`, error.message);
+    // If file doesn't exist or can't be copied, treat as wordpress.org slug
+  }
+
+  // Treat as wordpress.org slug
+  const resourceType = type === 'theme' ? 'wordpress.org/themes' : 'wordpress.org/plugins';
+  return {
+    resource: resourceType,
+    slug: arg,
+  };
 }
 
 /**
@@ -162,7 +215,7 @@ export async function launchWordPress() {
     ];
 
     // Build steps from CLI arguments (import, theme, plugins)
-    const cliSteps = buildCliBlueprintSteps();
+    const cliSteps = buildCliBlueprintSteps(ourTempDir);
 
     // Combine all steps: base steps first, then CLI steps, then user blueprint steps
     const allSteps = [...baseSteps, ...cliSteps];
