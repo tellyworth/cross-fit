@@ -1,7 +1,7 @@
 import { runCLI } from '@wp-playground/cli';
 import { readFileSync, mkdtempSync, existsSync, copyFileSync, mkdirSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { dirname, join, resolve } from 'path';
+import { dirname, join, resolve, basename } from 'path';
 import { tmpdir } from 'os';
 
 async function resolveBlueprintFromArg(arg) {
@@ -59,7 +59,7 @@ function buildCliBlueprintSteps(tempDir) {
           console.warn(`Warning: WXR file not found: ${filePath}`);
         } else {
           const fileContent = readFileSync(filePath, 'utf8');
-          const fileName = filePath.split('/').pop() || 'import.wxr';
+          const fileName = basename(filePath) || 'import.wxr';
           steps.push({
             step: 'importWxr',
             file: {
@@ -87,6 +87,8 @@ function buildCliBlueprintSteps(tempDir) {
           activate: true,
         },
       });
+    } else {
+      console.warn(`Warning: Could not resolve theme resource: ${themeArg}`);
     }
   }
 
@@ -104,6 +106,8 @@ function buildCliBlueprintSteps(tempDir) {
             activate: true,
           },
         });
+      } else {
+        console.warn(`Warning: Could not resolve plugin resource: ${pluginSlug}`);
       }
     }
   }
@@ -132,6 +136,11 @@ function resolveThemeOrPluginResource(arg, type, tempDir) {
   try {
     const filePath = resolve(arg);
     if (existsSync(filePath)) {
+      // Validate tempDir exists
+      if (!tempDir || !existsSync(tempDir)) {
+        throw new Error(`Temp directory does not exist: ${tempDir}`);
+      }
+
       // Ensure tmp directory exists in the temp dir
       const tmpDir = join(tempDir, 'tmp');
       if (!existsSync(tmpDir)) {
@@ -139,20 +148,29 @@ function resolveThemeOrPluginResource(arg, type, tempDir) {
       }
 
       // Copy file to temp directory with unique name
-      const fileName = filePath.split('/').pop() || filePath.split('\\').pop() || `${type}.zip`;
-      const destPath = join(tmpDir, `${Date.now()}-${fileName}`);
+      // Use timestamp + random to avoid collisions
+      const fileName = basename(filePath) || `${type}.zip`;
+      const uniqueId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+      const destPath = join(tmpDir, `${uniqueId}-${fileName}`);
       copyFileSync(filePath, destPath);
 
       // Reference via VFS (tempDir is mounted to /wordpress)
-      const vfsPath = `/wordpress/tmp/${destPath.split('/').pop() || destPath.split('\\').pop()}`;
+      // VFS paths always use forward slashes
+      const vfsPath = `/wordpress/tmp/${basename(destPath)}`;
       return {
         resource: 'vfs',
         path: vfsPath,
       };
     }
   } catch (error) {
-    console.warn(`Warning: Could not copy ${type} file ${arg} to temp directory:`, error.message);
-    // If file doesn't exist or can't be copied, treat as wordpress.org slug
+    // If it's a file not found error, treat as wordpress.org slug (expected behavior)
+    if (error.code === 'ENOENT') {
+      // File doesn't exist, treat as wordpress.org slug - fall through
+    } else {
+      // For other errors (permission, disk full, etc.), log and return null
+      console.warn(`Warning: Could not copy ${type} file ${arg} to temp directory:`, error.message);
+      return null;
+    }
   }
 
   // Treat as wordpress.org slug
