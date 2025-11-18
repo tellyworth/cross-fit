@@ -43,11 +43,27 @@ async function main() {
     // Do not forward --debug-log to Playwright
   }
 
+  if (options.import) {
+    env.WP_IMPORT = options.import;
+    // Do not forward --import to Playwright
+  }
+
+  if (options.theme) {
+    env.WP_THEME = options.theme;
+    // Do not forward --theme to Playwright
+  }
+
+  if (options.plugin) {
+    env.WP_PLUGINS = options.plugin;
+    // Do not forward --plugin to Playwright
+  }
+
   // Forward all other options to Playwright (e.g., --grep, --grep-invert, etc.)
   const forwardedArgs = [...passthrough];
   for (const [key, value] of Object.entries(options)) {
     // Skip custom options that we handle ourselves
-    if (key !== 'blueprint' && key !== 'debugLog' && key !== 'debug-log') {
+    if (key !== 'blueprint' && key !== 'debugLog' && key !== 'debug-log' &&
+        key !== 'import' && key !== 'theme' && key !== 'plugin') {
       forwardedArgs.push(`--${key}=${value}`);
     }
   }

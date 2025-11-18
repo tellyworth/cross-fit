@@ -1,7 +1,7 @@
 import { runCLI } from '@wp-playground/cli';
-import { readFileSync, mkdtempSync } from 'fs';
+import { readFileSync, mkdtempSync, existsSync, copyFileSync, mkdirSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { dirname, join, resolve, basename } from 'path';
 import { tmpdir } from 'os';
 
 async function resolveBlueprintFromArg(arg) {
@@ -29,7 +29,157 @@ function extractBlueprintArgFromProcess() {
   if (argvArg) return argvArg.split('=')[1];
   return null;
 }
-// (imports defined at top)
+
+/**
+ * Build blueprint steps from CLI arguments
+ * Returns an array of blueprint steps
+ * @param {string} tempDir - Path to the temp directory mounted to /wordpress in VFS
+ */
+function buildCliBlueprintSteps(tempDir) {
+  const steps = [];
+
+  // Handle WXR import
+  const importArg = process.env.WP_IMPORT;
+  if (importArg) {
+    // Determine if it's a URL or local file path
+    const isUrl = /^https?:\/\//i.test(importArg);
+    if (isUrl) {
+      steps.push({
+        step: 'importWxr',
+        file: {
+          resource: 'url',
+          url: importArg,
+        },
+      });
+    } else {
+      // Local file path - read the file and provide as literal resource
+      try {
+        const filePath = resolve(importArg);
+        if (!existsSync(filePath)) {
+          console.warn(`Warning: WXR file not found: ${filePath}`);
+        } else {
+          const fileContent = readFileSync(filePath, 'utf8');
+          const fileName = basename(filePath) || 'import.wxr';
+          steps.push({
+            step: 'importWxr',
+            file: {
+              resource: 'literal',
+              name: fileName,
+              contents: fileContent,
+            },
+          });
+        }
+      } catch (error) {
+        console.warn(`Warning: Could not read WXR file ${importArg}:`, error.message);
+      }
+    }
+  }
+
+  // Handle theme installation and activation
+  const themeArg = process.env.WP_THEME;
+  if (themeArg) {
+    const themeResource = resolveThemeOrPluginResource(themeArg, 'theme', tempDir);
+    if (themeResource) {
+      steps.push({
+        step: 'installTheme',
+        themeData: themeResource,
+        options: {
+          activate: true,
+        },
+      });
+    } else {
+      console.warn(`Warning: Could not resolve theme resource: ${themeArg}`);
+    }
+  }
+
+  // Handle plugin installation and activation (comma-separated)
+  const pluginsArg = process.env.WP_PLUGINS;
+  if (pluginsArg) {
+    const pluginSlugs = pluginsArg.split(',').map(s => s.trim()).filter(s => s);
+    for (const pluginSlug of pluginSlugs) {
+      const pluginResource = resolveThemeOrPluginResource(pluginSlug, 'plugin', tempDir);
+      if (pluginResource) {
+        steps.push({
+          step: 'installPlugin',
+          pluginData: pluginResource,
+          options: {
+            activate: true,
+          },
+        });
+      } else {
+        console.warn(`Warning: Could not resolve plugin resource: ${pluginSlug}`);
+      }
+    }
+  }
+
+  return steps;
+}
+
+/**
+ * Resolve a theme or plugin resource from a slug, URL, or local file path
+ * For local files, copies them to the temp directory which is mounted to /wordpress in VFS
+ * @param {string} arg - The slug, URL, or file path
+ * @param {string} type - Either 'theme' or 'plugin' to determine wordpress.org resource type
+ * @param {string} tempDir - Path to the temp directory mounted to /wordpress in VFS
+ * @returns {Object|null} Resource object for use in installTheme/installPlugin steps, or null if invalid
+ */
+function resolveThemeOrPluginResource(arg, type, tempDir) {
+  // Check if it's a URL
+  if (/^https?:\/\//i.test(arg)) {
+    return {
+      resource: 'url',
+      url: arg,
+    };
+  }
+
+  // Check if it's a local file path
+  try {
+    const filePath = resolve(arg);
+    if (existsSync(filePath)) {
+      // Validate tempDir exists
+      if (!tempDir || !existsSync(tempDir)) {
+        throw new Error(`Temp directory does not exist: ${tempDir}`);
+      }
+
+      // Ensure tmp directory exists in the temp dir
+      const tmpDir = join(tempDir, 'tmp');
+      if (!existsSync(tmpDir)) {
+        mkdirSync(tmpDir, { recursive: true });
+      }
+
+      // Copy file to temp directory with unique name
+      // Use timestamp + random to avoid collisions
+      const fileName = basename(filePath) || `${type}.zip`;
+      const uniqueId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+      const destPath = join(tmpDir, `${uniqueId}-${fileName}`);
+      copyFileSync(filePath, destPath);
+
+      // Reference via VFS (tempDir is mounted to /wordpress)
+      // VFS paths always use forward slashes
+      const vfsPath = `/wordpress/tmp/${basename(destPath)}`;
+      return {
+        resource: 'vfs',
+        path: vfsPath,
+      };
+    }
+  } catch (error) {
+    // If it's a file not found error, treat as wordpress.org slug (expected behavior)
+    if (error.code === 'ENOENT') {
+      // File doesn't exist, treat as wordpress.org slug - fall through
+    } else {
+      // For other errors (permission, disk full, etc.), log and return null
+      console.warn(`Warning: Could not copy ${type} file ${arg} to temp directory:`, error.message);
+      return null;
+    }
+  }
+
+  // Treat as wordpress.org slug
+  const resourceType = type === 'theme' ? 'wordpress.org/themes' : 'wordpress.org/plugins';
+  return {
+    resource: resourceType,
+    slug: arg,
+  };
+}
 
 /**
  * Normalize URL to always use 127.0.0.1 instead of localhost
@@ -82,15 +232,16 @@ export async function launchWordPress() {
       },
     ];
 
-    // Merge user blueprint if provided: prepend our base steps
-    const finalBlueprint = userBlueprint
-      ? {
-          ...userBlueprint,
-          steps: Array.isArray(userBlueprint.steps)
-            ? [...baseSteps, ...userBlueprint.steps]
-            : baseSteps,
-        }
-      : { steps: baseSteps };
+    // Build steps from CLI arguments (import, theme, plugins)
+    const cliSteps = buildCliBlueprintSteps(ourTempDir);
+
+    // Combine all steps: base steps first, then CLI steps, then user blueprint steps
+    const allSteps = [...baseSteps, ...cliSteps];
+    if (userBlueprint && Array.isArray(userBlueprint.steps)) {
+      allSteps.push(...userBlueprint.steps);
+    }
+
+    const finalBlueprint = { steps: allSteps };
 
     // Mount our temp directory to /wordpress before installation
     // This ensures WordPress files (including debug.log) are stored in our known directory
@@ -111,6 +262,19 @@ export async function launchWordPress() {
     });
 
     console.log('✓ Enabled WP_DEBUG, WP_DEBUG_DISPLAY, and WP_DEBUG_LOG via blueprint');
+
+    // Log CLI argument actions
+    if (process.env.WP_IMPORT) {
+      console.log(`✓ Will import WXR file: ${process.env.WP_IMPORT}`);
+    }
+    if (process.env.WP_THEME) {
+      console.log(`✓ Will install and activate theme: ${process.env.WP_THEME}`);
+    }
+    if (process.env.WP_PLUGINS) {
+      const plugins = process.env.WP_PLUGINS.split(',').map(s => s.trim()).filter(s => s);
+      console.log(`✓ Will install and activate plugins: ${plugins.join(', ')}`);
+    }
+
     if (blueprintArg) {
       console.log(`✓ Applied user blueprint from ${blueprintArg}`);
     }
