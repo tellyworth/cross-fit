@@ -69,7 +69,7 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
     let adminMenuItems = wpInstance.discoveredData?.adminMenuItems;
     if (!adminMenuItems || adminMenuItems.length === 0) {
       const { discoverAdminMenuItems } = await import('./test-helpers.js');
-      adminMenuItems = await discoverAdminMenuItems(wpInstance);
+      adminMenuItems = await discoverAdminMenuItems(wpInstance, page);
       // Cache for other tests
       if (global.wpDiscoveredData) {
         global.wpDiscoveredData.adminMenuItems = adminMenuItems;

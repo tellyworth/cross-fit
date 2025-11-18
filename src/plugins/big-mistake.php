@@ -173,4 +173,223 @@ function big_mistake_block_api_wordpress_org($preempt, $args, $url) {
 
 add_filter('pre_http_request', 'big_mistake_block_api_wordpress_org', 999, 3);
 
+/**
+ * Register REST API endpoint for test discovery data
+ * Provides post types, list pages, and admin menu items for E2E testing
+ */
+function big_mistake_register_discovery_endpoint() {
+  register_rest_route('big-mistake/v1', '/discovery', array(
+    'methods' => 'GET',
+    'callback' => 'big_mistake_get_discovery_data',
+    'permission_callback' => '__return_true', // Public endpoint for testing
+  ));
+}
+add_action('rest_api_init', 'big_mistake_register_discovery_endpoint');
+
+/**
+ * Get all discovery data for E2E tests
+ */
+function big_mistake_get_discovery_data() {
+  $data = array(
+    'postTypes' => big_mistake_discover_post_types(),
+    'listPages' => big_mistake_discover_list_pages(),
+    'adminMenuItems' => big_mistake_discover_admin_menu_items(),
+  );
+
+  return new WP_REST_Response($data, 200);
+}
+
+/**
+ * Discover public post types
+ */
+function big_mistake_discover_post_types() {
+  $post_types = get_post_types(array('public' => true, 'publicly_queryable' => true), 'objects');
+  $excluded_types = array(
+    'attachment',
+    'nav_menu_item',
+    'revision',
+    'wp_template',
+    'wp_template_part',
+    'wp_global_styles',
+    'wp_navigation',
+    'wp_font_family',
+    'wp_font_face',
+  );
+
+  $result = array();
+  foreach ($post_types as $slug => $post_type) {
+    if (in_array($slug, $excluded_types, true)) {
+      continue;
+    }
+
+    $rest_base = $post_type->rest_base ?? $slug;
+    if (!$rest_base) {
+      continue;
+    }
+
+    $result[] = array(
+      'slug' => $slug,
+      'name' => $post_type->label ?? $slug,
+      'rest_base' => $rest_base,
+      'has_archive' => $post_type->has_archive ?? false,
+    );
+  }
+
+  return $result;
+}
+
+/**
+ * Discover list page types (archives, categories, tags, etc.)
+ */
+function big_mistake_discover_list_pages() {
+  $list_pages = array(
+    'categories' => array(),
+    'tags' => array(),
+    'authors' => array(),
+    'dateArchives' => array(),
+    'customPostTypeArchives' => array(),
+    'search' => null,
+  );
+
+  // Discover categories
+  $categories = get_categories(array('hide_empty' => false, 'number' => 1));
+  if (!empty($categories)) {
+    foreach ($categories as $cat) {
+      $list_pages['categories'][] = array(
+        'id' => $cat->term_id,
+        'slug' => $cat->slug,
+        'url' => get_category_link($cat->term_id),
+      );
+    }
+  }
+
+  // Discover tags
+  $tags = get_tags(array('hide_empty' => false, 'number' => 1));
+  if (!empty($tags)) {
+    foreach ($tags as $tag) {
+      $list_pages['tags'][] = array(
+        'id' => $tag->term_id,
+        'slug' => $tag->slug,
+        'url' => get_tag_link($tag->term_id),
+      );
+    }
+  }
+
+  // Discover authors
+  $authors = get_users(array('who' => 'authors', 'number' => 1));
+  if (!empty($authors)) {
+    foreach ($authors as $author) {
+      $list_pages['authors'][] = array(
+        'id' => $author->ID,
+        'slug' => $author->user_nicename,
+        'url' => get_author_posts_url($author->ID),
+      );
+    }
+  }
+
+  // Discover date archives (from most recent post)
+  $recent_post = get_posts(array('numberposts' => 1, 'post_status' => 'publish'));
+  if (!empty($recent_post)) {
+    $post_date = get_post_time('Y-m-d', false, $recent_post[0]);
+    if ($post_date) {
+      $year = date('Y', strtotime($post_date));
+      $month = date('m', strtotime($post_date));
+      $list_pages['dateArchives'][] = array(
+        'year' => $year,
+        'month' => $month,
+        'url' => get_month_link($year, $month),
+      );
+    }
+  }
+
+  // Discover custom post type archives
+  $post_types = get_post_types(array('public' => true, 'has_archive' => true), 'objects');
+  foreach ($post_types as $slug => $post_type) {
+    if (in_array($slug, array('post', 'page'), true)) {
+      continue; // Skip built-in types
+    }
+    $archive_url = get_post_type_archive_link($slug);
+    if ($archive_url) {
+      $list_pages['customPostTypeArchives'][] = array(
+        'slug' => $slug,
+        'name' => $post_type->label ?? $slug,
+        'url' => $archive_url,
+      );
+    }
+  }
+
+  // Search is always available
+  $list_pages['search'] = array(
+    'url' => home_url('/?s=test'),
+  );
+
+  return $list_pages;
+}
+
+/**
+ * Discover admin menu items
+ */
+function big_mistake_discover_admin_menu_items() {
+  global $menu, $submenu;
+
+  // Ensure we're in admin context
+  if (!defined('WP_ADMIN')) {
+    define('WP_ADMIN', true);
+  }
+
+  // Set current user to admin for capability checks
+  $admin_user = get_user_by('login', 'admin');
+  if ($admin_user) {
+    wp_set_current_user($admin_user->ID);
+  } else {
+    $admins = get_users(array('role' => 'administrator', 'number' => 1));
+    if (!empty($admins)) {
+      wp_set_current_user($admins[0]->ID);
+    }
+  }
+
+  // Initialize menu arrays
+  $menu = array();
+  $submenu = array();
+
+  // Load admin menu
+  require_once ABSPATH . 'wp-admin/includes/menu.php';
+
+  // Trigger admin menu hooks
+  do_action('admin_menu');
+  do_action('admin_init');
+
+  $menu_items = array();
+
+  if (is_array($menu) && !empty($menu)) {
+    foreach ($menu as $item) {
+      if (!is_array($item) || count($item) < 3) {
+        continue;
+      }
+
+      $menu_slug = $item[2];
+      $menu_title = $item[0];
+
+      // Skip separators
+      if (empty($menu_slug) || $menu_slug === 'separator' || strpos($menu_slug, 'separator') !== false) {
+        continue;
+      }
+
+      // Extract title text (may contain HTML)
+      $title_text = wp_strip_all_tags($menu_title);
+
+      // Build admin URL
+      $admin_url = admin_url($menu_slug);
+
+      $menu_items[] = array(
+        'slug' => $menu_slug,
+        'title' => $title_text,
+        'url' => $admin_url,
+      );
+    }
+  }
+
+  return $menu_items;
+}
+
 

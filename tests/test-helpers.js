@@ -423,53 +423,19 @@ export async function discoverPostTypesFetch(baseUrl) {
 
 /**
  * Discover WordPress post types that have public single views
- * Uses REST API to get all registered post types
+ * Uses Big Mistake plugin's discovery endpoint
  *
  * @param {import('@playwright/test').Page} page - Playwright page object
  * @param {Object} wpInstance - WordPress instance with url property
  * @returns {Promise<Array<Object>>} Array of post type objects with slug, name, and rest_base
  */
 export async function discoverPostTypes(page, wpInstance) {
-  const result = await testWordPressRESTAPI(page, wpInstance, '/wp-json/wp/v2/types', {
+  const result = await testWordPressRESTAPI(page, wpInstance, '/wp-json/big-mistake/v1/discovery', {
     expectedStatus: 200,
   });
 
-  const postTypes = [];
-  // Post types that should be excluded (not public pages)
-  const excludedTypes = [
-    'attachment',      // Media attachments - not public pages
-    'nav_menu_item',   // Menu items - not public pages
-    'revision',        // Post revisions - not public pages
-    'wp_template',    // Block templates - require auth
-    'wp_template_part', // Template parts - require auth
-    'wp_global_styles', // Global styles - require auth
-    'wp_navigation',   // Navigation - require auth
-    'wp_font_family',  // Font families - require auth
-    'wp_font_face',    // Font faces - require auth
-  ];
-  
-  if (result.data && typeof result.data === 'object') {
-    for (const [slug, typeData] of Object.entries(result.data)) {
-      // Only include post types that:
-      // 1. Have REST API support (rest_base)
-      // 2. Are publicly queryable (publicly_queryable !== false)
-      // 3. Are not in the exclusion list
-      // 4. Are public (public !== false) - this is the key check for public accessibility
-      if (typeData.rest_base && 
-          typeData.publicly_queryable !== false &&
-          typeData.public !== false &&
-          !excludedTypes.includes(slug)) {
-        postTypes.push({
-          slug,
-          name: typeData.name || slug,
-          rest_base: typeData.rest_base,
-          has_archive: typeData.has_archive || false,
-        });
-      }
-    }
-  }
-
-  return postTypes;
+  // Return post types from discovery endpoint (already filtered)
+  return result.data?.postTypes || [];
 }
 
 /**
@@ -494,7 +460,7 @@ export async function getOneItemPerPostType(page, wpInstance, postTypes) {
     });
 
     const status = response.status();
-    
+
     // Fail if we get a non-200 response - this indicates discovery filtering didn't work correctly
     if (status !== 200) {
       const errorText = await response.text().catch(() => 'Could not read response body');
@@ -504,7 +470,7 @@ export async function getOneItemPerPostType(page, wpInstance, postTypes) {
         `Response: ${errorText.substring(0, 200)}`
       );
     }
-    
+
     // Process 200 response
     const data = await response.json();
     if (Array.isArray(data) && data.length > 0) {
@@ -544,7 +510,7 @@ export async function getAllItemsPerPostType(page, wpInstance, postTypes) {
     });
 
     const status = response.status();
-    
+
     // Fail if we get a non-200 response - this indicates discovery filtering didn't work correctly
     if (status !== 200) {
       const errorText = await response.text().catch(() => 'Could not read response body');
@@ -777,108 +743,59 @@ export async function discoverListPageTypesFetch(baseUrl) {
  * @returns {Promise<Object>} Object with different list page types and examples
  */
 export async function discoverListPageTypes(page, wpInstance) {
-  const listPages = {
+  // Use Big Mistake plugin's discovery endpoint
+  const result = await testWordPressRESTAPI(page, wpInstance, '/wp-json/big-mistake/v1/discovery', {
+    expectedStatus: 200,
+  });
+
+  // Return list pages from discovery endpoint (already formatted)
+  const listPages = result.data?.listPages || {
     categories: [],
     tags: [],
     authors: [],
     dateArchives: [],
     customPostTypeArchives: [],
-    search: null, // Search is always available at /?s=query
+    search: null,
   };
 
-  // Discover categories
-  try {
-    const categoriesResult = await testWordPressRESTAPI(page, wpInstance, '/wp-json/wp/v2/categories?per_page=1&hide_empty=false', {
-      expectedStatus: 200,
-    });
-    if (Array.isArray(categoriesResult.data) && categoriesResult.data.length > 0) {
-      listPages.categories = categoriesResult.data.map(cat => ({
-        id: cat.id,
-        slug: cat.slug,
-        link: cat.link || `/category/${cat.slug}/`,
-      }));
-    }
-  } catch (error) {
-    console.warn('Warning: Could not fetch categories:', error.message);
+  // Convert URLs to paths for categories, tags, authors
+  if (listPages.categories) {
+    listPages.categories = listPages.categories.map(cat => ({
+      ...cat,
+      link: cat.url ? new URL(cat.url).pathname : `/category/${cat.slug}/`,
+    }));
   }
-
-  // Discover tags
-  try {
-    const tagsResult = await testWordPressRESTAPI(page, wpInstance, '/wp-json/wp/v2/tags?per_page=1&hide_empty=false', {
-      expectedStatus: 200,
-    });
-    if (Array.isArray(tagsResult.data) && tagsResult.data.length > 0) {
-      listPages.tags = tagsResult.data.map(tag => ({
-        id: tag.id,
-        slug: tag.slug,
-        link: tag.link || `/tag/${tag.slug}/`,
-      }));
-    }
-  } catch (error) {
-    console.warn('Warning: Could not fetch tags:', error.message);
+  if (listPages.tags) {
+    listPages.tags = listPages.tags.map(tag => ({
+      ...tag,
+      link: tag.url ? new URL(tag.url).pathname : `/tag/${tag.slug}/`,
+    }));
   }
-
-  // Discover authors
-  try {
-    const authorsResult = await testWordPressRESTAPI(page, wpInstance, '/wp-json/wp/v2/users?per_page=1', {
-      expectedStatus: 200,
-    });
-    if (Array.isArray(authorsResult.data) && authorsResult.data.length > 0) {
-      listPages.authors = authorsResult.data.map(author => ({
-        id: author.id,
-        slug: author.slug,
-        link: author.link || `/author/${author.slug}/`,
-      }));
-    }
-  } catch (error) {
-    console.warn('Warning: Could not fetch authors:', error.message);
+  if (listPages.authors) {
+    listPages.authors = listPages.authors.map(author => ({
+      ...author,
+      link: author.url ? new URL(author.url).pathname : `/author/${author.slug}/`,
+    }));
   }
-
-  // Discover date archives - need to get posts first to find dates
-  try {
-    const postsResult = await testWordPressRESTAPI(page, wpInstance, '/wp-json/wp/v2/posts?per_page=1&status=publish', {
-      expectedStatus: 200,
-    });
-    if (Array.isArray(postsResult.data) && postsResult.data.length > 0) {
-      const post = postsResult.data[0];
-      if (post.date) {
-        const date = new Date(post.date);
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        listPages.dateArchives = [
-          { type: 'year', path: `/${year}/`, link: `/${year}/` },
-          { type: 'month', path: `/${year}/${month}/`, link: `/${year}/${month}/` },
-        ];
-      }
-    }
-  } catch (error) {
-    console.warn('Warning: Could not discover date archives:', error.message);
+  if (listPages.dateArchives) {
+    listPages.dateArchives = listPages.dateArchives.map(archive => ({
+      ...archive,
+      path: archive.url ? new URL(archive.url).pathname : `/${archive.year}/${archive.month}/`,
+      link: archive.url ? new URL(archive.url).pathname : `/${archive.year}/${archive.month}/`,
+    }));
   }
-
-  // Discover custom post type archives (from post types that have has_archive)
-  try {
-    const typesResult = await testWordPressRESTAPI(page, wpInstance, '/wp-json/wp/v2/types', {
-      expectedStatus: 200,
-    });
-    if (typesResult.data && typeof typesResult.data === 'object') {
-      for (const [slug, typeData] of Object.entries(typesResult.data)) {
-        if (typeData.has_archive && typeData.rest_base) {
-          // Custom post type archive URL is typically /{slug}/ or /{rest_base}/
-          const archivePath = typeData.has_archive === true ? `/${slug}/` : `/${typeData.has_archive}/`;
-          listPages.customPostTypeArchives.push({
-            postType: slug,
-            path: archivePath,
-            link: archivePath,
-          });
-        }
-      }
-    }
-  } catch (error) {
-    console.warn('Warning: Could not discover custom post type archives:', error.message);
+  if (listPages.customPostTypeArchives) {
+    listPages.customPostTypeArchives = listPages.customPostTypeArchives.map(archive => ({
+      ...archive,
+      path: archive.url ? new URL(archive.url).pathname : `/${archive.slug}/`,
+      link: archive.url ? new URL(archive.url).pathname : `/${archive.slug}/`,
+    }));
   }
-
-  // Search is always available
-  listPages.search = { path: '/?s=test', link: '/?s=test' };
+  if (listPages.search && listPages.search.url) {
+    listPages.search = {
+      url: listPages.search.url,
+    };
+  }
 
   return listPages;
 }
@@ -1041,140 +958,18 @@ export async function getAllListPageInstances(page, wpInstance) {
  * @param {Object} wpInstance - WordPress instance with server property
  * @returns {Promise<Array<Object>>} Array of menu item objects with slug, title, and URL
  */
-export async function discoverAdminMenuItems(wpInstance) {
-  // Get server from global instance if not available in wpInstance
-  const server = wpInstance?.server?.playground || global.wpInstance?.server?.playground;
-  if (!server) {
-    throw new Error('WordPress instance server not available for PHP execution');
+export async function discoverAdminMenuItems(wpInstance, page = null) {
+  // If page is not provided, we can't make the request
+  if (!page) {
+    throw new Error('Page object is required for admin menu discovery via REST API');
   }
 
-  try {
-    console.log('[DEBUG] Discovering admin menu items via PHP execution');
-    // Use a file in the WordPress directory that we can access
-    const tempFile = '/wordpress/wp-content/wp-menu-items.json';
+  const result = await testWordPressRESTAPI(page, wpInstance, '/wp-json/big-mistake/v1/discovery', {
+    expectedStatus: 200,
+  });
 
-    const writeResult = await server.run({
-      code: `<?php
-        // Suppress errors and warnings
-        error_reporting(0);
-        ini_set('display_errors', 0);
-
-        require_once '/wordpress/wp-load.php';
-
-        // Set up admin context
-        if (!defined('WP_ADMIN')) {
-          define('WP_ADMIN', true);
-        }
-
-        // Set current user to admin (menu items are filtered by capabilities)
-        $admin_user = get_user_by('login', 'admin');
-        if ($admin_user) {
-          wp_set_current_user($admin_user->ID);
-        } else {
-          // Try to get first admin user
-          $admins = get_users(array('role' => 'administrator', 'number' => 1));
-          if (!empty($admins)) {
-            wp_set_current_user($admins[0]->ID);
-          }
-        }
-
-        // Initialize menu array before requiring menu.php
-        global $menu, $submenu;
-        $menu = array();
-        $submenu = array();
-
-        // Suppress output while loading menu
-        ob_start();
-        require_once ABSPATH . 'wp-admin/includes/menu.php';
-        ob_end_clean();
-
-        // Trigger admin menu setup hooks
-        do_action('admin_menu');
-        do_action('admin_init');
-
-        $menuItems = array();
-
-        if (is_array($menu) && !empty($menu)) {
-          foreach ($menu as $item) {
-            // $menu structure: [0] => title, [1] => capability, [2] => menu_slug, [3] => page_title, [4] => classes, [5] => icon, [6] => position
-            if (is_array($item) && count($item) >= 3) {
-              $menuSlug = $item[2];
-              $menuTitle = $item[0];
-
-              // Skip separators (empty menu_slug or separator)
-              if (!empty($menuSlug) && $menuSlug !== 'separator' && strpos($menuSlug, 'separator') === false) {
-                // Extract title text (may contain HTML)
-                $titleText = strip_tags($menuTitle);
-
-                // Build admin URL
-                $adminUrl = admin_url($menuSlug);
-
-                $menuItems[] = array(
-                  'slug' => $menuSlug,
-                  'title' => $titleText,
-                  'url' => $adminUrl,
-                );
-              }
-            }
-          }
-        }
-
-        // Write JSON to file in WordPress directory
-        $file = '${tempFile}';
-        $json = json_encode($menuItems);
-        $written = file_put_contents($file, $json);
-        return $written !== false ? 'OK: ' . strlen($json) . ' bytes written' : 'FAILED';
-      `,
-    });
-
-    console.log('[DEBUG] Admin menu write result:', writeResult);
-
-    // Read the file back
-    const readResult = await server.run({
-      code: `<?php
-        $file = '${tempFile}';
-        if (file_exists($file)) {
-          $content = file_get_contents($file);
-          return $content;
-        }
-        return '[]';
-      `,
-    });
-
-    console.log('[DEBUG] Admin menu file read result type:', typeof readResult);
-    console.log('[DEBUG] Admin menu file read result:', readResult);
-
-    // Parse the JSON result from the file read
-    let resultText;
-    if (typeof readResult === 'string') {
-      resultText = readResult;
-    } else if (readResult?.bytes && readResult.bytes.length > 0) {
-      resultText = new TextDecoder().decode(readResult.bytes);
-    } else if (readResult?.text) {
-      resultText = readResult.text;
-    } else if (readResult?.body?.text) {
-      resultText = readResult.body.text;
-    } else {
-      console.error('[DEBUG] Could not extract text from file read result:', readResult);
-      resultText = '[]';
-    }
-
-    console.log('[DEBUG] Admin menu JSON text:', resultText.substring(0, 200));
-
-    let menuItems;
-    try {
-      menuItems = JSON.parse(resultText);
-    } catch (parseError) {
-      console.error('[DEBUG] Failed to parse admin menu JSON:', parseError);
-      console.error('[DEBUG] Raw result text:', resultText);
-      throw new Error(`Failed to parse admin menu JSON: ${parseError.message}`);
-    }
-
-    return Array.isArray(menuItems) ? menuItems : [];
-  } catch (error) {
-    console.warn('Warning: Could not discover admin menu items:', error.message);
-    return [];
-  }
+  // Return admin menu items from discovery endpoint (already formatted)
+  return result.data?.adminMenuItems || [];
 }
 
 /**
