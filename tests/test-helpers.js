@@ -138,7 +138,7 @@ export async function readDebugLog(wpInstance, options = {}) {
 
     return null;
   } catch (e) {
-    console.error(`[readDebugLog] Error reading debug log at "${wpInstance?.debugLogPath}":`, e);
+    console.error(`[readDebugLog] Error reading debug log:`, e.message);
     return null;
   }
 }
@@ -430,12 +430,22 @@ export async function discoverPostTypesFetch(baseUrl) {
  * @returns {Promise<Array<Object>>} Array of post type objects with slug, name, and rest_base
  */
 export async function discoverPostTypes(page, wpInstance) {
-  const result = await testWordPressRESTAPI(page, wpInstance, '/wp-json/big-mistake/v1/discovery', {
-    expectedStatus: 200,
-  });
+  console.log('[DEBUG] Discovering post types via /wp-json/big-mistake/v1/discovery');
+  try {
+    const result = await testWordPressRESTAPI(page, wpInstance, '/wp-json/big-mistake/v1/discovery', {
+      expectedStatus: 200,
+    });
 
-  // Return post types from discovery endpoint (already filtered)
-  return result.data?.postTypes || [];
+    console.log('[DEBUG] Discovery endpoint returned successfully');
+    // Return post types from discovery endpoint (already filtered)
+    return result.data?.postTypes || [];
+  } catch (error) {
+    console.error('[DEBUG] Error discovering post types:', error.message);
+    if (error.message.includes('Response body:')) {
+      console.error('[DEBUG] Full error:', error.message);
+    }
+    throw error;
+  }
 }
 
 /**
@@ -743,10 +753,14 @@ export async function discoverListPageTypesFetch(baseUrl) {
  * @returns {Promise<Object>} Object with different list page types and examples
  */
 export async function discoverListPageTypes(page, wpInstance) {
-  // Use Big Mistake plugin's discovery endpoint
-  const result = await testWordPressRESTAPI(page, wpInstance, '/wp-json/big-mistake/v1/discovery', {
-    expectedStatus: 200,
-  });
+  console.log('[DEBUG] Discovering list pages via /wp-json/big-mistake/v1/discovery');
+  try {
+    // Use Big Mistake plugin's discovery endpoint
+    const result = await testWordPressRESTAPI(page, wpInstance, '/wp-json/big-mistake/v1/discovery', {
+      expectedStatus: 200,
+    });
+
+    console.log('[DEBUG] Discovery endpoint returned successfully for list pages');
 
   // Return list pages from discovery endpoint (already formatted)
   const listPages = result.data?.listPages || {
@@ -797,7 +811,14 @@ export async function discoverListPageTypes(page, wpInstance) {
     };
   }
 
-  return listPages;
+    return listPages;
+  } catch (error) {
+    console.error('[DEBUG] Error discovering list pages:', error.message);
+    if (error.message.includes('Response body:')) {
+      console.error('[DEBUG] Full error:', error.message);
+    }
+    throw error;
+  }
 }
 
 /**
@@ -964,12 +985,22 @@ export async function discoverAdminMenuItems(wpInstance, page = null) {
     throw new Error('Page object is required for admin menu discovery via REST API');
   }
 
-  const result = await testWordPressRESTAPI(page, wpInstance, '/wp-json/big-mistake/v1/discovery', {
-    expectedStatus: 200,
-  });
+  console.log('[DEBUG] Discovering admin menu items via /wp-json/big-mistake/v1/discovery');
+  try {
+    const result = await testWordPressRESTAPI(page, wpInstance, '/wp-json/big-mistake/v1/discovery', {
+      expectedStatus: 200,
+    });
 
-  // Return admin menu items from discovery endpoint (already formatted)
-  return result.data?.adminMenuItems || [];
+    console.log('[DEBUG] Discovery endpoint returned successfully for admin menu');
+    // Return admin menu items from discovery endpoint (already formatted)
+    return result.data?.adminMenuItems || [];
+  } catch (error) {
+    console.error('[DEBUG] Error discovering admin menu items:', error.message);
+    if (error.message.includes('Response body:')) {
+      console.error('[DEBUG] Full error:', error.message);
+    }
+    throw error;
+  }
 }
 
 /**
@@ -1253,6 +1284,8 @@ export async function testWordPressRESTAPI(page, wpInstance, path, options = {})
     validateResponse = null,
   } = options;
 
+  console.log(`[DEBUG] Making REST API request: ${method} ${url}`);
+
   // Make API request using Playwright's APIRequestContext
   // page.request is an APIRequestContext that provides get(), post(), etc.
   let response;
@@ -1285,7 +1318,27 @@ export async function testWordPressRESTAPI(page, wpInstance, path, options = {})
       response = await page.request.get(url, { headers: requestHeaders });
   }
 
-  expect(response.status()).toBe(expectedStatus);
+  const status = response.status();
+  if (status !== expectedStatus) {
+    // Get error details for debugging
+    const contentType = response.headers()['content-type'] || '';
+    let errorBody = '';
+    try {
+      if (contentType.includes('json')) {
+        const errorData = await response.json();
+        errorBody = JSON.stringify(errorData, null, 2);
+      } else {
+        errorBody = await response.text();
+      }
+    } catch (e) {
+      errorBody = `Could not read error response: ${e.message}`;
+    }
+
+    throw new Error(
+      `Expected HTTP ${expectedStatus} but got ${status} for ${path}\n` +
+      `Response body:\n${errorBody.substring(0, 1000)}`
+    );
+  }
 
   // Parse JSON response
   const contentType = response.headers()['content-type'] || '';

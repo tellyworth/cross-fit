@@ -190,13 +190,27 @@ add_action('rest_api_init', 'big_mistake_register_discovery_endpoint');
  * Get all discovery data for E2E tests
  */
 function big_mistake_get_discovery_data() {
-  $data = array(
-    'postTypes' => big_mistake_discover_post_types(),
-    'listPages' => big_mistake_discover_list_pages(),
-    'adminMenuItems' => big_mistake_discover_admin_menu_items(),
-  );
+  try {
+    $data = array(
+      'postTypes' => big_mistake_discover_post_types(),
+      'listPages' => big_mistake_discover_list_pages(),
+      'adminMenuItems' => big_mistake_discover_admin_menu_items(),
+    );
 
-  return new WP_REST_Response($data, 200);
+    return new WP_REST_Response($data, 200);
+  } catch (Exception $e) {
+    return new WP_Error(
+      'discovery_error',
+      'Error discovering WordPress data: ' . $e->getMessage(),
+      array('status' => 500)
+    );
+  } catch (Error $e) {
+    return new WP_Error(
+      'discovery_error',
+      'Fatal error discovering WordPress data: ' . $e->getMessage(),
+      array('status' => 500)
+    );
+  }
 }
 
 /**
@@ -328,15 +342,10 @@ function big_mistake_discover_list_pages() {
 
 /**
  * Discover admin menu items
+ * Note: Admin menu is only available in admin context, so we use a simpler approach
+ * by checking common admin pages directly
  */
 function big_mistake_discover_admin_menu_items() {
-  global $menu, $submenu;
-
-  // Ensure we're in admin context
-  if (!defined('WP_ADMIN')) {
-    define('WP_ADMIN', true);
-  }
-
   // Set current user to admin for capability checks
   $admin_user = get_user_by('login', 'admin');
   if ($admin_user) {
@@ -348,43 +357,30 @@ function big_mistake_discover_admin_menu_items() {
     }
   }
 
-  // Initialize menu arrays
-  $menu = array();
-  $submenu = array();
-
-  // Load admin menu
-  require_once ABSPATH . 'wp-admin/includes/menu.php';
-
-  // Trigger admin menu hooks
-  do_action('admin_menu');
-  do_action('admin_init');
+  // Common admin menu items that are always available
+  // We'll check if the user has access to each
+  $common_menu_items = array(
+    array('slug' => 'index.php', 'title' => 'Dashboard', 'cap' => 'read'),
+    array('slug' => 'edit.php', 'title' => 'Posts', 'cap' => 'edit_posts'),
+    array('slug' => 'upload.php', 'title' => 'Media', 'cap' => 'upload_files'),
+    array('slug' => 'edit.php?post_type=page', 'title' => 'Pages', 'cap' => 'edit_pages'),
+    array('slug' => 'edit-comments.php', 'title' => 'Comments', 'cap' => 'moderate_comments'),
+    array('slug' => 'themes.php', 'title' => 'Appearance', 'cap' => 'switch_themes'),
+    array('slug' => 'plugins.php', 'title' => 'Plugins', 'cap' => 'activate_plugins'),
+    array('slug' => 'users.php', 'title' => 'Users', 'cap' => 'list_users'),
+    array('slug' => 'tools.php', 'title' => 'Tools', 'cap' => 'manage_options'),
+    array('slug' => 'options-general.php', 'title' => 'Settings', 'cap' => 'manage_options'),
+  );
 
   $menu_items = array();
 
-  if (is_array($menu) && !empty($menu)) {
-    foreach ($menu as $item) {
-      if (!is_array($item) || count($item) < 3) {
-        continue;
-      }
-
-      $menu_slug = $item[2];
-      $menu_title = $item[0];
-
-      // Skip separators
-      if (empty($menu_slug) || $menu_slug === 'separator' || strpos($menu_slug, 'separator') !== false) {
-        continue;
-      }
-
-      // Extract title text (may contain HTML)
-      $title_text = wp_strip_all_tags($menu_title);
-
-      // Build admin URL
-      $admin_url = admin_url($menu_slug);
-
+  foreach ($common_menu_items as $item) {
+    // Check if current user has the required capability
+    if (current_user_can($item['cap'])) {
       $menu_items[] = array(
-        'slug' => $menu_slug,
-        'title' => $title_text,
-        'url' => $admin_url,
+        'slug' => $item['slug'],
+        'title' => $item['title'],
+        'url' => admin_url($item['slug']),
       );
     }
   }

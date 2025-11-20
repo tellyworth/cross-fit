@@ -72,6 +72,24 @@ npm test -- --import=./export.xml --theme=twentytwentyfour --plugin=akismet,jetp
 - `npm run test:ui` - Run tests with Playwright UI mode (interactive)
 - `npm run test:headed` - Run tests with visible browser window
 
+#### Debugging Options
+
+**View WordPress Debug Log**
+
+After tests complete, you can view the WordPress debug log to see PHP errors, warnings, and notices that occurred during the test run:
+
+```bash
+# Show the last 50 lines of the debug log
+npm test -- --debug-log=50
+
+# Show the last 200 lines
+npm test -- --debug-log=200
+```
+
+The debug log is automatically captured from the WordPress instance and displayed at the end of the test run. Even without `--debug-log`, the teardown will report how many lines are in the debug log and the file path if any errors occurred.
+
+**Note**: The debug log only contains PHP errors, warnings, and notices. Network errors (like `ECONNRESET`) and test timeouts are not logged to the WordPress debug log.
+
 #### Running Test Subsets
 
 Use Playwright's grep filters to run subsets by tag:

@@ -1,5 +1,5 @@
 import { runCLI } from '@wp-playground/cli';
-import { readFileSync, mkdtempSync, existsSync, copyFileSync, mkdirSync } from 'fs';
+import { readFileSync, mkdtempSync, existsSync, copyFileSync, mkdirSync, readdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join, resolve, basename } from 'path';
 import { tmpdir } from 'os';
@@ -218,19 +218,26 @@ export async function launchWordPress() {
     const userBlueprint = await resolveBlueprintFromArg(blueprintArg);
 
     // Base blueprint: enable WordPress debug constants
+    // WP_DEBUG_LOG can be:
+    //   - true: uses default path wp-content/debug.log (relative to ABSPATH)
+    //   - string: absolute file path to log file
+    // Since we mount /wordpress to our temp dir, we use an explicit absolute path
+    // to ensure WordPress writes to our mounted location
+    const debugLogVfsPath = '/wordpress/wp-content/debug.log';
     const baseSteps = [
       {
         step: 'defineWpConfigConsts',
         consts: {
           WP_DEBUG: true,
           WP_DEBUG_DISPLAY: true,
-          WP_DEBUG_LOG: true,
+          WP_DEBUG_LOG: debugLogVfsPath, // Explicit absolute path in VFS that maps to our temp dir
           // Disable automatic updates to avoid external requests
           AUTOMATIC_UPDATER_DISABLED: true,
           WP_AUTO_UPDATE_CORE: false,
         },
       },
     ];
+
 
     // Build steps from CLI arguments (import, theme, plugins)
     const cliSteps = buildCliBlueprintSteps(ourTempDir);
@@ -364,11 +371,14 @@ export async function launchWordPress() {
   // by Playground and don't surface through the RemoteAPI interface
   // We rely on PHP error detection in rendered page content (WP_DEBUG_DISPLAY)
 
+  // Store the debug log path for teardown
+  const debugLogPath = `${ourTempDir}/wp-content/debug.log`;
+
   return {
     url: serverUrl,
     server: cliServer,
     // Since we mounted /wordpress to our temp dir, debug.log is directly in wp-content
-    debugLogPath: `${ourTempDir}/wp-content/debug.log`,
+    debugLogPath: debugLogPath,
     stop: async () => {
       try {
         // Try to stop the server - it may have a stop method or need cleanup via server property
