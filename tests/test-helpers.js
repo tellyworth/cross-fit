@@ -1160,10 +1160,10 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
    * @param {number} [retryDelayMs=500] - Delay before retrying navigation (default: 500ms, empirically chosen for WP admin JS load)
    * @returns {Promise<Response>} - Playwright Response object
    */
-  async function navigateWithRetry(page, url, retryDelayMs = 500) {
+  async function navigateWithRetry(page, url, retryDelayMs = 500, navigationTimeout = 30000) {
     try {
       // Use 'commit' which waits for navigation to start (much faster)
-      return await page.goto(url, { waitUntil: 'commit', timeout: 30000 });
+      return await page.goto(url, { waitUntil: 'commit', timeout: navigationTimeout });
     } catch (e) {
       if (page.isClosed()) {
         throw new Error('Page was closed during navigation');
@@ -1175,7 +1175,7 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
           throw new Error('Page was closed after navigation error');
         }
         try {
-          return await page.goto(url, { waitUntil: 'commit', timeout: 30000 });
+          return await page.goto(url, { waitUntil: 'commit', timeout: navigationTimeout });
         } catch (retryError) {
           if (page.isClosed()) {
             throw new Error('Page was closed during retry navigation');
