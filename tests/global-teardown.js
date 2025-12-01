@@ -8,8 +8,13 @@ import { readDebugLog } from './test-helpers.js';
 async function globalTeardown(wpInstance) {
   console.log('\n[Global Teardown] Stopping WordPress Playground...');
 
-  // Access the WordPress instance from the parameter (Playwright passes return value from globalSetup)
-  const instance = wpInstance || global.wpInstance;
+  // Playwright doesn't reliably pass the return value from globalSetup to globalTeardown
+  // Instead, it sometimes passes the config object. We rely on global.wpInstance which
+  // we set in globalSetup and persists in the same process.
+  // Check if wpInstance parameter is actually our WordPress instance (has stop method)
+  const instance = (wpInstance && typeof wpInstance.stop === 'function')
+    ? wpInstance
+    : global.wpInstance;
 
   // Try to stop the instance first (if it's still running)
   if (instance && typeof instance.stop === 'function') {
@@ -39,11 +44,17 @@ async function globalTeardown(wpInstance) {
         if (lines.length > 0) {
           console.log(`[Global Teardown] Debug log contains ${lines.length} line(s) at: ${debugLogPath}`);
         }
+      } else {
+        // Log when file doesn't exist so we know the path was checked
+        console.log(`[Global Teardown] Debug log file does not exist at: ${debugLogPath}`);
       }
     } catch (error) {
       // Log errors so we can diagnose issues (but don't fail teardown)
       console.warn(`[Global Teardown] Could not read debug log at ${debugLogPath}: ${error.message}`);
     }
+  } else {
+    // Log when debug log path is not available
+    console.log(`[Global Teardown] Debug log path not available (instance may have crashed before setup completed)`);
   }
 
   // Output debug log content if requested via CLI argument (--debug-log=n)
