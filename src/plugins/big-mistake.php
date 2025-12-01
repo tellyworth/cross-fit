@@ -388,4 +388,47 @@ function big_mistake_discover_admin_menu_items() {
   return $menu_items;
 }
 
+/**
+ * Shutdown handler to log PHP fatal errors to php.log
+ * This catches fatal errors that occur after WordPress has loaded
+ */
+function big_mistake_shutdown_handler() {
+  $error = error_get_last();
+
+  // Only log fatal errors (E_ERROR, E_CORE_ERROR, E_COMPILE_ERROR, E_PARSE, E_RECOVERABLE_ERROR)
+  if ($error !== null && ($error['type'] & (E_ERROR | E_CORE_ERROR | E_COMPILE_ERROR | E_PARSE | E_RECOVERABLE_ERROR))) {
+    $error_type = 'Unknown';
+    switch ($error['type']) {
+      case E_ERROR:
+        $error_type = 'E_ERROR';
+        break;
+      case E_CORE_ERROR:
+        $error_type = 'E_CORE_ERROR';
+        break;
+      case E_COMPILE_ERROR:
+        $error_type = 'E_COMPILE_ERROR';
+        break;
+      case E_PARSE:
+        $error_type = 'E_PARSE';
+        break;
+      case E_RECOVERABLE_ERROR:
+        $error_type = 'E_RECOVERABLE_ERROR';
+        break;
+    }
+
+    $message = sprintf(
+      '[%s] PHP Fatal error (%s): %s in %s on line %d',
+      date('Y-m-d H:i:s'),
+      $error_type,
+      $error['message'],
+      $error['file'],
+      $error['line']
+    );
+
+    error_log($message);
+  }
+}
+// Register shutdown handler to catch fatal errors
+register_shutdown_function('big_mistake_shutdown_handler');
+
 
