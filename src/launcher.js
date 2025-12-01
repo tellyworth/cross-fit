@@ -207,7 +207,7 @@ function normalizeUrl(url) {
 export async function launchWordPress() {
   console.log('Starting WordPress Playground...');
 
-  // Create our own temp directory that we can access for php.log
+  // Create our own temp directory that we can access for debug.log
   // This directory will be mounted to /wordpress in Playground's VFS
   const ourTempDir = mkdtempSync(join(tmpdir(), 'cross-fit-wp-'));
 
@@ -223,14 +223,14 @@ export async function launchWordPress() {
     //   - string: absolute file path to log file
     // Since we mount /wordpress to our temp dir, we use an explicit absolute path
     // to ensure WordPress writes to our mounted location
-    const phpLogVfsPath = '/wordpress/wp-content/php.log';
+    const debugLogVfsPath = '/wordpress/wp-content/debug.log';
     const baseSteps = [
       {
         step: 'defineWpConfigConsts',
         consts: {
           WP_DEBUG: true,
           WP_DEBUG_DISPLAY: true,
-          WP_DEBUG_LOG: phpLogVfsPath, // Explicit absolute path in VFS that maps to our temp dir
+          WP_DEBUG_LOG: debugLogVfsPath, // Explicit absolute path in VFS that maps to our temp dir
           // Disable automatic updates to avoid external requests
           AUTOMATIC_UPDATER_DISABLED: true,
           WP_AUTO_UPDATE_CORE: false,
@@ -247,9 +247,8 @@ export async function launchWordPress() {
       {
         step: 'runPHP',
         code: `<?php
-// Write startup header to PHP log
-// Use the explicit path that matches our VFS mount
-$log_path = '/wordpress/wp-content/php.log';
+// Write startup header to debug.log
+$log_path = '/wordpress/wp-content/debug.log';
 $log_dir = dirname($log_path);
 
 // Ensure directory exists
@@ -257,10 +256,9 @@ if (!file_exists($log_dir)) {
   mkdir($log_dir, 0755, true);
 }
 
+// Write startup header to debug log
 $timestamp = date('Y-m-d H:i:s');
 $header = "WordPress Playground started at {$timestamp}" . PHP_EOL;
-
-// Write directly to file (error_log might not be configured yet at blueprint execution time)
 file_put_contents($log_path, $header, FILE_APPEND | LOCK_EX);
 `,
       },
@@ -279,7 +277,7 @@ file_put_contents($log_path, $header, FILE_APPEND | LOCK_EX);
     const finalBlueprint = { steps: allSteps };
 
     // Mount our temp directory to /wordpress before installation
-    // This ensures WordPress files (including php.log) are stored in our known directory
+    // This ensures WordPress files (including debug.log) are stored in our known directory
     cliServer = await runCLI({
       command: 'server',
       php: '8.3',
@@ -296,7 +294,7 @@ file_put_contents($log_path, $header, FILE_APPEND | LOCK_EX);
       ],
     });
 
-    console.log('✓ Enabled WP_DEBUG, WP_DEBUG_DISPLAY, and WP_DEBUG_LOG (php.log) via blueprint');
+    console.log('✓ Enabled WP_DEBUG, WP_DEBUG_DISPLAY, and WP_DEBUG_LOG via blueprint');
 
     // Log CLI argument actions
     if (process.env.WP_IMPORT) {
@@ -399,14 +397,14 @@ file_put_contents($log_path, $header, FILE_APPEND | LOCK_EX);
   // by Playground and don't surface through the RemoteAPI interface
   // We rely on PHP error detection in rendered page content (WP_DEBUG_DISPLAY)
 
-  // Store the PHP log path for teardown
-  const phpLogPath = `${ourTempDir}/wp-content/php.log`;
+  // Store the debug log path for teardown
+  const debugLogPath = `${ourTempDir}/wp-content/debug.log`;
 
   return {
     url: serverUrl,
     server: cliServer,
-    // Since we mounted /wordpress to our temp dir, php.log is directly in wp-content
-    debugLogPath: phpLogPath,
+    // Since we mounted /wordpress to our temp dir, debug.log is directly in wp-content
+    debugLogPath: debugLogPath,
     stop: async () => {
       try {
         // Try to stop the server - it may have a stop method or need cleanup via server property

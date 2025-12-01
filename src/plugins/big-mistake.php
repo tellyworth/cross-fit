@@ -11,6 +11,7 @@
   * It is of no use outside of e2e testing and will break production sites.
   */
 
+
 /**
  * Trigger PHP errors based on request parameters or headers
  */
@@ -389,7 +390,7 @@ function big_mistake_discover_admin_menu_items() {
 }
 
 /**
- * Shutdown handler to log PHP fatal errors to php.log
+ * Shutdown handler to log PHP fatal errors to debug.log
  * This catches fatal errors that occur after WordPress has loaded
  */
 function big_mistake_shutdown_handler() {
