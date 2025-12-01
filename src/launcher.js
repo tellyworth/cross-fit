@@ -236,6 +236,14 @@ export async function launchWordPress() {
           WP_AUTO_UPDATE_CORE: false,
         },
       },
+      {
+        step: 'setSiteOptions',
+        options: {
+          // Disable compression test to prevent non-critical AJAX requests during tests
+          // This prevents wp-compression-test requests that often get aborted
+          can_compress_scripts: false,
+        },
+      },
     ];
 
 
