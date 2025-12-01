@@ -12,12 +12,28 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
 
   test('should access authenticated admin dashboard', { tag: '@smoke' }, async ({ page, wpInstance }) => {
     await testWordPressAdminPage(page, wpInstance, '/wp-admin/');
+    // Wait briefly for network to settle (allows critical resources to load)
+    // Timeout is longer under parallel load - network may be busy
+    await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {
+      // Ignore timeout - network may not become fully idle, but page is functional
+    });
   });
 
   test('should access multiple admin pages', async ({ page, wpInstance }) => {
     // Test multiple admin pages
     await testWordPressAdminPage(page, wpInstance, '/wp-admin/');
+    // Wait briefly for network to settle (allows critical resources to load)
+    // Timeout is longer under parallel load - network may be busy
+    await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {
+      // Ignore timeout - network may not become fully idle, but page is functional
+    });
+
     await testWordPressAdminPage(page, wpInstance, '/wp-admin/options-general.php');
+    // Wait briefly for network to settle (allows critical resources to load)
+    // Timeout is longer under parallel load - network may be busy
+    await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {
+      // Ignore timeout - network may not become fully idle, but page is functional
+    });
     // Add more admin pages easily:
     // await testWordPressAdminPage(page, wpInstance, '/wp-admin/edit.php');
     // await testWordPressAdminPage(page, wpInstance, '/wp-admin/upload.php');
@@ -33,6 +49,12 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
     const optionsResponse = await page.goto(optionsUrl, { waitUntil: 'commit' });
 
     expect(optionsResponse.status()).toBe(200);
+
+    // Wait briefly for network to settle (allows critical resources to load)
+    // Timeout is longer under parallel load - network may be busy
+    await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {
+      // Ignore timeout - network may not become fully idle, but page is functional
+    });
 
     // Wait for the form field - this ensures the page is fully loaded and interactive
     await expect(page.locator('#blogdescription')).toBeVisible({ timeout: 15000 });
@@ -53,6 +75,12 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
     // The field being visible indicates the page has reloaded after form submission
     await expect(page.locator('#blogdescription')).toBeVisible({ timeout: 15000 });
 
+    // Wait briefly for network to settle after form submission
+    // Timeout is longer under parallel load - network may be busy
+    await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {
+      // Ignore timeout - network may not become fully idle, but page is functional
+    });
+
     // Wait a moment for the save to complete
     await page.waitForTimeout(1000);
 
@@ -63,6 +91,9 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
   });
 
   test('should access all top-level admin menu items without errors', async ({ page, wpInstance }) => {
+    // This test accesses multiple admin pages, so it needs more time
+    test.setTimeout(60000); // 60 seconds for multiple page loads
+
     const isFullMode = process.env.FULL_MODE === '1';
 
     // Discover admin menu items lazily if not already cached
@@ -85,14 +116,23 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
     }
 
     // Test each top-level menu item
-    for (const menuItem of adminMenuItems) {
+    for (let i = 0; i < adminMenuItems.length; i++) {
+      const menuItem = adminMenuItems[i];
       // Extract path from full URL
       const url = new URL(menuItem.url);
       const path = url.pathname + url.search;
 
       try {
+        // Use a shorter timeout per menu item to prevent one failure from blocking all tests
         await testWordPressAdminPage(page, wpInstance, path, {
           description: `Admin menu: ${menuItem.title} (${menuItem.slug})`,
+          timeout: 10000, // 10 seconds per page instead of default 20
+        });
+
+        // Wait for network to be idle to ensure all resources (especially JS files) finish loading
+        // This prevents ECONNRESET errors by ensuring all requests complete before moving on
+        await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {
+          // Ignore timeout - network may not become fully idle, but page is functional
         });
       } catch (error) {
         // Log warning for inaccessible items but continue testing others
