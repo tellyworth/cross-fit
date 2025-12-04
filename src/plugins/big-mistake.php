@@ -175,6 +175,41 @@ function big_mistake_block_api_wordpress_org($preempt, $args, $url) {
 add_filter('pre_http_request', 'big_mistake_block_api_wordpress_org', 999, 3);
 
 /**
+ * Disable WordPress update checks that run on admin pages
+ * These checks can cause slow page loads when they timeout
+ */
+function big_mistake_disable_update_checks() {
+  // Disable automatic background update checks
+  remove_action('wp_update_plugins', 'wp_update_plugins');
+  remove_action('wp_update_themes', 'wp_update_themes');
+  remove_action('wp_version_check', 'wp_version_check');
+  remove_action('wp_maybe_auto_update', 'wp_maybe_auto_update');
+
+  // Disable update checks on admin pages
+  remove_action('admin_init', '_maybe_update_core');
+  remove_action('admin_init', '_maybe_update_plugins');
+  remove_action('admin_init', '_maybe_update_themes');
+  remove_action('admin_init', 'wp_maybe_auto_update');
+
+  // Disable update checks on admin pages (alternative hooks)
+  remove_action('load-update-core.php', 'wp_update_plugins');
+  remove_action('load-update-core.php', 'wp_update_themes');
+  remove_action('load-update-core.php', 'wp_version_check');
+}
+
+add_action('init', 'big_mistake_disable_update_checks', 1);
+
+/**
+ * Disable WordPress Heartbeat API to reduce server load
+ * The Heartbeat API can cause slow admin pages in resource-constrained environments
+ */
+function big_mistake_disable_heartbeat() {
+  wp_deregister_script('heartbeat');
+}
+
+add_action('init', 'big_mistake_disable_heartbeat', 1);
+
+/**
  * Register REST API endpoint for test discovery data
  * Provides post types, list pages, and admin menu items for E2E testing
  */
