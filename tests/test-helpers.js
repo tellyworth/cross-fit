@@ -1206,6 +1206,11 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
     // If none found, continue - we'll check below
   });
 
+  // Wait a bit longer for critical resources to load before considering page "ready"
+  // This gives scripts and AJAX calls time to complete without aborting
+  // Use a short wait to avoid slowing tests too much, but allow resources to finish
+  await page.waitForTimeout(500);
+
   // Detect PHP errors in page content (when WP_DEBUG_DISPLAY is enabled)
   let phpErrors = [];
   try {
@@ -1284,7 +1289,6 @@ export async function testWordPressRESTAPI(page, wpInstance, path, options = {})
     validateResponse = null,
   } = options;
 
-  console.log(`[DEBUG] Making REST API request: ${method} ${url}`);
 
   // Make API request using Playwright's APIRequestContext
   // page.request is an APIRequestContext that provides get(), post(), etc.
