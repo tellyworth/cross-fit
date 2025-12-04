@@ -210,6 +210,23 @@ function big_mistake_disable_heartbeat() {
 add_action('init', 'big_mistake_disable_heartbeat', 1);
 
 /**
+ * Disable WordPress compression test AJAX request
+ * The compression test runs on admin pages and makes an AJAX request that often gets aborted
+ * We already set can_compress_scripts: false in the blueprint, but we also need to remove the action
+ * Hook on both 'init' (for early removal) and 'admin_init' (as backup)
+ */
+function big_mistake_disable_compression_test() {
+  // Remove the compression test action that triggers the AJAX request
+  remove_action('admin_print_scripts', 'compression_test');
+}
+
+// Hook early on init to disable before admin_print_scripts fires
+add_action('init', 'big_mistake_disable_compression_test', 999);
+// Also hook on admin_init as backup
+add_action('admin_init', 'big_mistake_disable_compression_test', 1);
+
+
+/**
  * Register REST API endpoint for test discovery data
  * Provides post types, list pages, and admin menu items for E2E testing
  */
