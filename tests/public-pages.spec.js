@@ -88,7 +88,12 @@ test.describe('WordPress Public Pages', { tag: '@public' }, () => {
     }
 
     // Test each item
-    for (const item of items) {
+    // Extend timeout dynamically after each successful page load
+    // This allows the test to complete even with many items, while still timing out if a page hangs
+    const timeoutExtensionPerItem = 5000; // Add 5 seconds per item (enough for most pages)
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
       if (item.link) {
         // Extract path from full URL
         const url = new URL(item.link);
@@ -98,6 +103,10 @@ test.describe('WordPress Public Pages', { tag: '@public' }, () => {
             description: `${item.postTypeName} (${item.postType}): ${path}`,
             waitUntil: 'load', // Use load instead of networkidle for faster tests
           });
+
+          // After successful page load, extend timeout for remaining items
+          // This ensures we have enough time to complete all items
+          test.setTimeout(test.info().timeout + timeoutExtensionPerItem);
         } catch (error) {
           // If page times out or doesn't exist, log and continue
           if (error.message.includes('timeout') || error.message.includes('404')) {
@@ -213,12 +222,22 @@ test.describe('WordPress Public Pages', { tag: '@public' }, () => {
     }
 
     // Test each list page
-    for (const pageDef of pagesToTest) {
+    // Extend timeout dynamically after each successful page load
+    // This allows the test to complete even with many pages, while still timing out if a page hangs
+    const timeoutExtensionPerPage = 5000; // Add 5 seconds per page (enough for most pages)
+
+    for (let i = 0; i < pagesToTest.length; i++) {
+      const pageDef = pagesToTest[i];
+
       try {
         await testWordPressPage(page, wpInstance, pageDef.path, {
           description: pageDef.description,
           waitUntil: 'load', // Use load instead of networkidle for faster tests
         });
+
+        // After successful page load, extend timeout for remaining pages
+        // This ensures we have enough time to complete all pages
+        test.setTimeout(test.info().timeout + timeoutExtensionPerPage);
       } catch (error) {
         // If page times out or doesn't exist, log and continue
         if (error.message.includes('timeout') || error.message.includes('404')) {

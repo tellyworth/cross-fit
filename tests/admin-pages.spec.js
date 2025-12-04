@@ -22,6 +22,9 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
   test('should access multiple admin pages', async ({ page, wpInstance }) => {
     // Test multiple admin pages
     await testWordPressAdminPage(page, wpInstance, '/wp-admin/');
+    // Extend timeout after first page to allow for additional pages
+    test.setTimeout(test.info().timeout + 30000); // Add 30 seconds
+
     // Wait briefly for network to settle (allows critical resources to load)
     // Timeout is longer under parallel load - network may be busy
     await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {
@@ -116,8 +119,13 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
     }
 
     // Test each top-level menu item
+    // Extend timeout dynamically after each successful page load
+    // This allows the test to complete even with many items, while still timing out if a page hangs
+    const timeoutExtensionPerItem = 10000; // Add 10 seconds per item (admin pages are slower)
+
     for (let i = 0; i < adminMenuItems.length; i++) {
       const menuItem = adminMenuItems[i];
+
       // Extract path from full URL
       const url = new URL(menuItem.url);
       const path = url.pathname + url.search;
@@ -134,6 +142,9 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
         await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {
           // Ignore timeout - network may not become fully idle, but page is functional
         });
+
+        // After successful page load, extend timeout for remaining items
+        test.setTimeout(test.info().timeout + timeoutExtensionPerItem);
       } catch (error) {
         // Log warning for inaccessible items but continue testing others
         console.warn(`Warning: Could not access admin menu item "${menuItem.title}" (${menuItem.slug}):`, error.message);
@@ -150,6 +161,9 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
               await testWordPressAdminPage(page, wpInstance, submenuPath, {
                 description: `Admin submenu: ${submenuItem.title} (${submenuItem.slug}) under ${menuItem.title}`,
               });
+
+              // After successful submenu page load, extend timeout
+              test.setTimeout(test.info().timeout + timeoutExtensionPerItem);
             } catch (subError) {
               console.warn(`Warning: Could not access admin submenu item "${submenuItem.title}" (${submenuItem.slug}):`, subError.message);
             }
