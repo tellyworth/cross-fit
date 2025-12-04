@@ -211,19 +211,22 @@ add_action('init', 'big_mistake_disable_heartbeat', 1);
 
 /**
  * Disable WordPress compression test AJAX request
- * The compression test runs on admin pages and makes an AJAX request that often gets aborted
- * We already set can_compress_scripts: false in the blueprint, but we also need to remove the action
- * Hook on both 'init' (for early removal) and 'admin_init' (as backup)
+ * WordPress checks get_site_option('can_compress_scripts') in admin-footer.php
+ * If it returns false, compression_test() is called. We use filters to ensure it returns true.
  */
-function big_mistake_disable_compression_test() {
-  // Remove the compression test action that triggers the AJAX request
-  remove_action('admin_print_scripts', 'compression_test');
+function big_mistake_filter_can_compress_scripts($value) {
+  // WordPress only calls compression_test() if get_site_option('can_compress_scripts') === false
+  // Return true (or any non-false value) to prevent the test from running
+  return true;
 }
 
-// Hook early on init to disable before admin_print_scripts fires
-add_action('init', 'big_mistake_disable_compression_test', 999);
-// Also hook on admin_init as backup
-add_action('admin_init', 'big_mistake_disable_compression_test', 1);
+// Filter both the option and default option to catch all cases
+// WordPress uses get_site_option() which checks both the option and default
+add_filter('option_can_compress_scripts', 'big_mistake_filter_can_compress_scripts');
+add_filter('default_option_can_compress_scripts', 'big_mistake_filter_can_compress_scripts');
+// Also filter site option for multisite
+add_filter('site_option_can_compress_scripts', 'big_mistake_filter_can_compress_scripts');
+add_filter('default_site_option_can_compress_scripts', 'big_mistake_filter_can_compress_scripts');
 
 
 /**
