@@ -335,43 +335,21 @@ file_put_contents($log_path, $header, FILE_APPEND | LOCK_EX);
 
   console.log(`✓ Server is ready at ${serverUrl}`);
 
-  // Install Big Mistake plugin as a must-use plugin
-  // mu-plugins are loaded automatically - files go directly in the directory (not subdirectories)
+  // Install Big Mistake plugin as a must-use plugin by copying it into wp-content/mu-plugins
+  // mu-plugins are loaded automatically on every request
   try {
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = dirname(__filename);
-    const pluginPath = join(__dirname, 'plugins', 'big-mistake.php');
-    const pluginContent = readFileSync(pluginPath, 'utf8');
-    const pluginBase64 = Buffer.from(pluginContent).toString('base64');
+    const pluginSourcePath = join(__dirname, 'plugins', 'big-mistake.php');
 
-    // Write plugin to mu-plugins directory
-    const result = await cliServer.playground.run({
-      code: `<?php
-        $mu_plugins_dir = '/wordpress/wp-content/mu-plugins';
-        if (!file_exists($mu_plugins_dir)) {
-          mkdir($mu_plugins_dir, 0755, true);
-        }
-        $plugin_file = $mu_plugins_dir . '/big-mistake.php';
-        $content = base64_decode('${pluginBase64}');
-        $bytes = file_put_contents($plugin_file, $content);
-        $success = $bytes !== false && file_exists($plugin_file);
-        return $success ? 'OK' : 'FAILED';
-      `,
-    });
-
-    // The result from playground.run() may be a PHP response object
-    // Check if it contains 'OK' or if the result itself is 'OK'
-    const resultText = typeof result === 'string' ? result :
-                       (result?.text || result?.body?.text || result?.toString() || '');
-
-    // Also check if result is an object with success property
-    if (resultText === 'OK' || (typeof result === 'object' && result?.success === true)) {
-      console.log('✓ Installed Big Mistake plugin as must-use plugin');
-    } else {
-      // Don't warn - plugin might still be installed even if result format is unexpected
-      // We'll verify it works when tests run
-      console.log('✓ Installed Big Mistake plugin as must-use plugin');
+    const muPluginsDir = join(ourTempDir, 'wp-content', 'mu-plugins');
+    if (!existsSync(muPluginsDir)) {
+      mkdirSync(muPluginsDir, { recursive: true });
     }
+
+    const pluginDestPath = join(muPluginsDir, 'big-mistake.php');
+    copyFileSync(pluginSourcePath, pluginDestPath);
+    console.log('✓ Installed Big Mistake plugin as must-use plugin');
   } catch (error) {
     console.warn('Warning: Failed to install Big Mistake plugin:', error.message);
   }
