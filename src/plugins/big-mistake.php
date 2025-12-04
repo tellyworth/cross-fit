@@ -230,44 +230,49 @@ add_filter('default_site_option_can_compress_scripts', 'big_mistake_filter_can_c
 
 
 /**
- * Register REST API endpoint for test discovery data
- * Provides post types, list pages, and admin menu items for E2E testing
+ * Generate discovery data for E2E tests.
+ * Returns an array with post types, list pages, and admin menu items.
  */
-function big_mistake_register_discovery_endpoint() {
-  register_rest_route('big-mistake/v1', '/discovery', array(
-    'methods' => 'GET',
-    'callback' => 'big_mistake_get_discovery_data',
-    'permission_callback' => '__return_true', // Public endpoint for testing
-  ));
+function big_mistake_get_discovery_data_array() {
+  return array(
+    'postTypes' => big_mistake_discover_post_types(),
+    'listPages' => big_mistake_discover_list_pages(),
+    'adminMenuItems' => big_mistake_discover_admin_menu_items(),
+  );
 }
-add_action('rest_api_init', 'big_mistake_register_discovery_endpoint');
 
 /**
- * Get all discovery data for E2E tests
+ * Write discovery data to a JSON file in wp-content.
+ * This file is used by the test suite instead of a REST API endpoint.
  */
-function big_mistake_get_discovery_data() {
-  try {
-    $data = array(
-      'postTypes' => big_mistake_discover_post_types(),
-      'listPages' => big_mistake_discover_list_pages(),
-      'adminMenuItems' => big_mistake_discover_admin_menu_items(),
-    );
+function big_mistake_write_discovery_file() {
+  // Ensure WP_CONTENT_DIR is defined
+  if (!defined('WP_CONTENT_DIR')) {
+    return;
+  }
 
-    return new WP_REST_Response($data, 200);
+  $file_path = WP_CONTENT_DIR . '/big-mistake-discovery.json';
+
+  try {
+    $data = big_mistake_get_discovery_data_array();
+
+    // Use wp_json_encode for proper encoding
+    $json = wp_json_encode($data, JSON_PRETTY_PRINT);
+    if ($json === false) {
+      return;
+    }
+
+    // Attempt to write the file
+    file_put_contents($file_path, $json);
   } catch (Exception $e) {
-    return new WP_Error(
-      'discovery_error',
-      'Error discovering WordPress data: ' . $e->getMessage(),
-      array('status' => 500)
-    );
+    // Fail silently in production; tests will report if discovery fails
   } catch (Error $e) {
-    return new WP_Error(
-      'discovery_error',
-      'Fatal error discovering WordPress data: ' . $e->getMessage(),
-      array('status' => 500)
-    );
+    // Fail silently; tests will surface issues
   }
 }
+
+// Generate discovery file on init so it's available before tests run
+add_action('init', 'big_mistake_write_discovery_file', 20);
 
 /**
  * Discover public post types
@@ -345,8 +350,11 @@ function big_mistake_discover_list_pages() {
     }
   }
 
-  // Discover authors
-  $authors = get_users(array('who' => 'authors', 'number' => 1));
+  // Discover authors (avoid deprecated 'who' parameter; use capability instead)
+  $authors = get_users(array(
+    'capability' => 'edit_posts',
+    'number' => 1,
+  ));
   if (!empty($authors)) {
     foreach ($authors as $author) {
       $list_pages['authors'][] = array(

@@ -430,20 +430,14 @@ export async function discoverPostTypesFetch(baseUrl) {
  * @returns {Promise<Array<Object>>} Array of post type objects with slug, name, and rest_base
  */
 export async function discoverPostTypes(page, wpInstance) {
-  console.log('[DEBUG] Discovering post types via /wp-json/big-mistake/v1/discovery');
+  console.log('[DEBUG] Discovering post types via wp-content/big-mistake-discovery.json');
   try {
-    const result = await testWordPressRESTAPI(page, wpInstance, '/wp-json/big-mistake/v1/discovery', {
-      expectedStatus: 200,
-    });
-
-    console.log('[DEBUG] Discovery endpoint returned successfully');
-    // Return post types from discovery endpoint (already filtered)
-    return result.data?.postTypes || [];
+    const data = await loadDiscoveryDataFromFile(page, wpInstance);
+    const postTypes = Array.isArray(data.postTypes) ? data.postTypes : [];
+    console.log(`[DEBUG] Discovery file returned ${postTypes.length} post types`);
+    return postTypes;
   } catch (error) {
-    console.error('[DEBUG] Error discovering post types:', error.message);
-    if (error.message.includes('Response body:')) {
-      console.error('[DEBUG] Full error:', error.message);
-    }
+    console.error('[DEBUG] Error discovering post types from discovery file:', error.message);
     throw error;
   }
 }
@@ -753,70 +747,67 @@ export async function discoverListPageTypesFetch(baseUrl) {
  * @returns {Promise<Object>} Object with different list page types and examples
  */
 export async function discoverListPageTypes(page, wpInstance) {
-  console.log('[DEBUG] Discovering list pages via /wp-json/big-mistake/v1/discovery');
+  console.log('[DEBUG] Discovering list pages via wp-content/big-mistake-discovery.json');
   try {
-    // Use Big Mistake plugin's discovery endpoint
-    const result = await testWordPressRESTAPI(page, wpInstance, '/wp-json/big-mistake/v1/discovery', {
-      expectedStatus: 200,
-    });
+    const data = await loadDiscoveryDataFromFile(page, wpInstance);
+    const rawListPages = data.listPages || {};
 
-    console.log('[DEBUG] Discovery endpoint returned successfully for list pages');
-
-  // Return list pages from discovery endpoint (already formatted)
-  const listPages = result.data?.listPages || {
-    categories: [],
-    tags: [],
-    authors: [],
-    dateArchives: [],
-    customPostTypeArchives: [],
-    search: null,
-  };
-
-  // Convert URLs to paths for categories, tags, authors
-  if (listPages.categories) {
-    listPages.categories = listPages.categories.map(cat => ({
-      ...cat,
-      link: cat.url ? new URL(cat.url).pathname : `/category/${cat.slug}/`,
-    }));
-  }
-  if (listPages.tags) {
-    listPages.tags = listPages.tags.map(tag => ({
-      ...tag,
-      link: tag.url ? new URL(tag.url).pathname : `/tag/${tag.slug}/`,
-    }));
-  }
-  if (listPages.authors) {
-    listPages.authors = listPages.authors.map(author => ({
-      ...author,
-      link: author.url ? new URL(author.url).pathname : `/author/${author.slug}/`,
-    }));
-  }
-  if (listPages.dateArchives) {
-    listPages.dateArchives = listPages.dateArchives.map(archive => ({
-      ...archive,
-      path: archive.url ? new URL(archive.url).pathname : `/${archive.year}/${archive.month}/`,
-      link: archive.url ? new URL(archive.url).pathname : `/${archive.year}/${archive.month}/`,
-    }));
-  }
-  if (listPages.customPostTypeArchives) {
-    listPages.customPostTypeArchives = listPages.customPostTypeArchives.map(archive => ({
-      ...archive,
-      path: archive.url ? new URL(archive.url).pathname : `/${archive.slug}/`,
-      link: archive.url ? new URL(archive.url).pathname : `/${archive.slug}/`,
-    }));
-  }
-  if (listPages.search && listPages.search.url) {
-    listPages.search = {
-      url: listPages.search.url,
+    const listPages = {
+      categories: rawListPages.categories || [],
+      tags: rawListPages.tags || [],
+      authors: rawListPages.authors || [],
+      dateArchives: rawListPages.dateArchives || [],
+      customPostTypeArchives: rawListPages.customPostTypeArchives || [],
+      search: rawListPages.search || null,
     };
-  }
+
+    // Convert URLs to paths for categories, tags, authors
+    if (listPages.categories) {
+      listPages.categories = listPages.categories.map(cat => ({
+        ...cat,
+        link: cat.url ? new URL(cat.url).pathname : `/category/${cat.slug}/`,
+      }));
+    }
+    if (listPages.tags) {
+      listPages.tags = listPages.tags.map(tag => ({
+        ...tag,
+        link: tag.url ? new URL(tag.url).pathname : `/tag/${tag.slug}/`,
+      }));
+    }
+    if (listPages.authors) {
+      listPages.authors = listPages.authors.map(author => ({
+        ...author,
+        link: author.url ? new URL(author.url).pathname : `/author/${author.slug}/`,
+      }));
+    }
+    if (listPages.dateArchives) {
+      listPages.dateArchives = listPages.dateArchives.map(archive => ({
+        ...archive,
+        path: archive.url ? new URL(archive.url).pathname : `/${archive.year}/${archive.month}/`,
+        link: archive.url ? new URL(archive.url).pathname : `/${archive.year}/${archive.month}/`,
+      }));
+    }
+    if (listPages.customPostTypeArchives) {
+      listPages.customPostTypeArchives = listPages.customPostTypeArchives.map(archive => ({
+        ...archive,
+        path: archive.url ? new URL(archive.url).pathname : `/${archive.slug}/`,
+        link: archive.url ? new URL(archive.url).pathname : `/${archive.slug}/`,
+      }));
+    }
+    if (listPages.search && listPages.search.url) {
+      const searchUrl = new URL(listPages.search.url);
+      const searchPath = searchUrl.pathname + (searchUrl.search || '');
+      listPages.search = {
+        path: searchPath,
+        link: searchPath,
+      };
+    } else if (!listPages.search) {
+      listPages.search = { path: '/?s=test', link: '/?s=test' };
+    }
 
     return listPages;
   } catch (error) {
-    console.error('[DEBUG] Error discovering list pages:', error.message);
-    if (error.message.includes('Response body:')) {
-      console.error('[DEBUG] Full error:', error.message);
-    }
+    console.error('[DEBUG] Error discovering list pages from discovery file:', error.message);
     throw error;
   }
 }
@@ -982,25 +973,61 @@ export async function getAllListPageInstances(page, wpInstance) {
 export async function discoverAdminMenuItems(wpInstance, page = null) {
   // If page is not provided, we can't make the request
   if (!page) {
-    throw new Error('Page object is required for admin menu discovery via REST API');
+    throw new Error('Page object is required for admin menu discovery');
   }
 
-  console.log('[DEBUG] Discovering admin menu items via /wp-json/big-mistake/v1/discovery');
+  console.log('[DEBUG] Discovering admin menu items via wp-content/big-mistake-discovery.json');
   try {
-    const result = await testWordPressRESTAPI(page, wpInstance, '/wp-json/big-mistake/v1/discovery', {
-      expectedStatus: 200,
-    });
-
-    console.log('[DEBUG] Discovery endpoint returned successfully for admin menu');
-    // Return admin menu items from discovery endpoint (already formatted)
-    return result.data?.adminMenuItems || [];
+    const data = await loadDiscoveryDataFromFile(page, wpInstance);
+    const adminMenuItems = Array.isArray(data.adminMenuItems) ? data.adminMenuItems : [];
+    console.log(`[DEBUG] Discovery file returned ${adminMenuItems.length} admin menu items`);
+    return adminMenuItems;
   } catch (error) {
-    console.error('[DEBUG] Error discovering admin menu items:', error.message);
-    if (error.message.includes('Response body:')) {
-      console.error('[DEBUG] Full error:', error.message);
-    }
+    console.error('[DEBUG] Error discovering admin menu items from discovery file:', error.message);
     throw error;
   }
+}
+
+// Cache discovery data across calls within a test run
+let cachedDiscoveryData = null;
+
+/**
+ * Load discovery data from wp-content/big-mistake-discovery.json
+ * Uses Playwright's page.request to fetch the JSON file.
+ *
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @param {Object} wpInstance - WordPress instance with url property
+ * @returns {Promise<Object>} Parsed discovery data object
+ */
+async function loadDiscoveryDataFromFile(page, wpInstance) {
+  if (cachedDiscoveryData) {
+    return cachedDiscoveryData;
+  }
+
+  const url = normalizePath(wpInstance.url, '/wp-content/big-mistake-discovery.json');
+  console.log(`[DEBUG] Fetching discovery data from ${url}`);
+
+  const response = await page.request.get(url, {
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  const status = response.status();
+  if (status !== 200) {
+    const bodyText = await response.text().catch(() => '');
+    throw new Error(
+      `Failed to load discovery data from ${url}: HTTP ${status}. ` +
+      `Response: ${bodyText.substring(0, 200)}`
+    );
+  }
+
+  const data = await response.json().catch((err) => {
+    throw new Error(`Failed to parse discovery JSON from ${url}: ${err.message}`);
+  });
+
+  cachedDiscoveryData = data || {};
+  return cachedDiscoveryData;
 }
 
 /**
