@@ -1,7 +1,7 @@
 import { test, expect } from './wp-fixtures.js';
 import {
   testWordPressAdminPage,
-  discoverAdminSubmenuItems,
+  discoverAllAdminSubmenuItems,
 } from './test-helpers.js';
 
 /**
@@ -150,27 +150,37 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
         console.warn(`Warning: Could not access admin menu item "${menuItem.title}" (${menuItem.slug}):`, error.message);
       }
 
-      // In full mode, also test all submenu items
-      if (isFullMode) {
-        try {
-          const submenuItems = await discoverAdminSubmenuItems(wpInstance, menuItem.slug);
-          for (const submenuItem of submenuItems) {
-            const submenuUrl = new URL(submenuItem.url);
-            const submenuPath = submenuUrl.pathname + submenuUrl.search;
-            try {
-              await testWordPressAdminPage(page, wpInstance, submenuPath, {
-                description: `Admin submenu: ${submenuItem.title} (${submenuItem.slug}) under ${menuItem.title}`,
-              });
+    }
 
-              // After successful submenu page load, extend timeout
-              test.setTimeout(test.info().timeout + timeoutExtensionPerItem);
-            } catch (subError) {
-              console.warn(`Warning: Could not access admin submenu item "${submenuItem.title}" (${submenuItem.slug}):`, subError.message);
-            }
+    // In full mode, also test all submenu items as a flat list
+    if (isFullMode) {
+      try {
+        // Fetch all submenu items once
+        const allSubmenuItems = await discoverAllAdminSubmenuItems(wpInstance, page);
+
+        // Process all submenu items as a flat list
+        for (const submenuItem of allSubmenuItems) {
+          const submenuUrl = new URL(submenuItem.url);
+          const submenuPath = submenuUrl.pathname + submenuUrl.search;
+          try {
+            await testWordPressAdminPage(page, wpInstance, submenuPath, {
+              description: `Admin submenu: ${submenuItem.title} (${submenuItem.slug})`,
+              timeout: 10000, // 10 seconds per page
+            });
+
+            // Wait for network to be idle
+            await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {
+              // Ignore timeout - network may not become fully idle, but page is functional
+            });
+
+            // After successful submenu page load, extend timeout
+            test.setTimeout(test.info().timeout + timeoutExtensionPerItem);
+          } catch (subError) {
+            console.warn(`Warning: Could not access admin submenu item "${submenuItem.title}" (${submenuItem.slug}):`, subError.message);
           }
-        } catch (error) {
-          console.warn(`Warning: Could not discover submenu items for "${menuItem.title}":`, error.message);
         }
+      } catch (error) {
+        console.warn(`Warning: Could not discover submenu items:`, error.message);
       }
     }
   });

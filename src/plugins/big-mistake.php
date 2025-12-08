@@ -231,13 +231,14 @@ add_filter('default_site_option_can_compress_scripts', 'big_mistake_filter_can_c
 
 /**
  * Generate discovery data for E2E tests.
- * Returns an array with post types, list pages, and admin menu items.
+ * Returns an array with post types, list pages, admin menu items, and submenu items.
  */
 function big_mistake_get_discovery_data_array() {
   return array(
-    'postTypes' => big_mistake_discover_post_types(),
-    'listPages' => big_mistake_discover_list_pages(),
-    'adminMenuItems' => big_mistake_discover_admin_menu_items(),
+    'postTypes'        => big_mistake_discover_post_types(),
+    'listPages'        => big_mistake_discover_list_pages(),
+    'adminMenuItems'   => big_mistake_discover_admin_menu_items(),
+    'adminSubmenuItems'=> big_mistake_discover_admin_submenu_items(),
   );
 }
 
@@ -271,8 +272,9 @@ function big_mistake_write_discovery_file() {
   }
 }
 
-// Generate discovery file on init so it's available before tests run
-add_action('init', 'big_mistake_write_discovery_file', 20);
+// Generate discovery file on admin requests after menus and submenus are built.
+// admin_head runs after admin_menu, so $menu and $submenu are populated.
+add_action('admin_head', 'big_mistake_write_discovery_file', 20);
 
 /**
  * Discover public post types
@@ -405,7 +407,7 @@ function big_mistake_discover_list_pages() {
 }
 
 /**
- * Discover admin menu items
+ * Discover admin menu items (top-level)
  * Note: Admin menu is only available in admin context, so we use a simpler approach
  * by checking common admin pages directly
  */
@@ -450,6 +452,55 @@ function big_mistake_discover_admin_menu_items() {
   }
 
   return $menu_items;
+}
+
+/**
+ * Discover admin submenu items for all top-level menus.
+ * Uses the global $submenu structure built by WordPress.
+ *
+ * @return array Array of submenu item arrays with parent, slug, title, and url.
+ */
+function big_mistake_discover_admin_submenu_items() {
+  $submenu_items = array();
+
+  if (!is_admin()) {
+    return $submenu_items;
+  }
+
+  global $submenu;
+
+  if (!is_array($submenu)) {
+    return $submenu_items;
+  }
+
+  foreach ($submenu as $parent_slug => $items) {
+    if (!is_array($items)) {
+      continue;
+    }
+
+    foreach ($items as $item) {
+      // $submenu structure: [0] => title, [1] => capability, [2] => menu_slug
+      if (!is_array($item) || count($item) < 3) {
+        continue;
+      }
+
+      $menu_slug  = $item[2];
+      $menu_title = $item[0];
+
+      // Extract title text (may contain HTML)
+      $title_text = wp_strip_all_tags($menu_title);
+      $admin_url  = admin_url($menu_slug);
+
+      $submenu_items[] = array(
+        'parent' => $parent_slug,
+        'slug'   => $menu_slug,
+        'title'  => $title_text,
+        'url'    => $admin_url,
+      );
+    }
+  }
+
+  return $submenu_items;
 }
 
 /**

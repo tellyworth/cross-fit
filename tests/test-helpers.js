@@ -430,11 +430,9 @@ export async function discoverPostTypesFetch(baseUrl) {
  * @returns {Promise<Array<Object>>} Array of post type objects with slug, name, and rest_base
  */
 export async function discoverPostTypes(page, wpInstance) {
-  console.log('[DEBUG] Discovering post types via wp-content/big-mistake-discovery.json');
   try {
     const data = await loadDiscoveryDataFromFile(page, wpInstance);
     const postTypes = Array.isArray(data.postTypes) ? data.postTypes : [];
-    console.log(`[DEBUG] Discovery file returned ${postTypes.length} post types`);
     return postTypes;
   } catch (error) {
     console.error('[DEBUG] Error discovering post types from discovery file:', error.message);
@@ -1038,62 +1036,48 @@ async function loadDiscoveryDataFromFile(page, wpInstance) {
  * @param {string} parentSlug - Parent menu slug
  * @returns {Promise<Array<Object>>} Array of submenu item objects with slug, title, and URL
  */
-export async function discoverAdminSubmenuItems(wpInstance, parentSlug) {
-  // Get server from global instance if not available in wpInstance
-  const server = wpInstance?.server?.playground || global.wpInstance?.server?.playground;
-  if (!server) {
-    throw new Error('WordPress instance server not available for PHP execution');
+/**
+ * Discover all admin submenu items as a flat list
+ * Fetches discovery data once and returns all submenu items regardless of parent
+ *
+ * @param {Object} wpInstance - WordPress instance with url property
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @returns {Promise<Array<Object>>} Array of all submenu items
+ */
+export async function discoverAllAdminSubmenuItems(wpInstance, page) {
+  if (!page) {
+    throw new Error('Page object is required for admin submenu discovery');
   }
 
-  try {
-    // Escape the parentSlug for use in PHP code
-    const escapedSlug = parentSlug.replace(/'/g, "\\'");
+  console.log(`[DEBUG] Discovering all admin submenu items via wp-content/big-mistake-discovery.json`);
+  const data = await loadDiscoveryDataFromFile(page, wpInstance);
+  const allSubmenus = Array.isArray(data.adminSubmenuItems) ? data.adminSubmenuItems : [];
+  console.log(`[DEBUG] Discovery file returned ${allSubmenus.length} total submenu items`);
+  return allSubmenus;
+}
 
-    const result = await server.run({
-      code: `<?php
-        require_once '/wordpress/wp-load.php';
-
-        // Get the admin submenu structure
-        global $submenu;
-
-        $submenuItems = array();
-
-        if (is_array($submenu) && isset($submenu['${escapedSlug}'])) {
-          foreach ($submenu['${escapedSlug}'] as $item) {
-            // $submenu structure: [0] => title, [1] => capability, [2] => menu_slug
-            if (is_array($item) && count($item) >= 3) {
-              $menuSlug = $item[2];
-              $menuTitle = $item[0];
-
-              // Extract title text (may contain HTML)
-              $titleText = strip_tags($menuTitle);
-
-              // Build admin URL
-              $adminUrl = admin_url($menuSlug);
-
-              $submenuItems[] = array(
-                'slug' => $menuSlug,
-                'title' => $titleText,
-                'url' => $adminUrl,
-                'parent' => '${escapedSlug}',
-              );
-            }
-          }
-        }
-
-        return json_encode($submenuItems);
-      `,
-    });
-
-    // Parse the JSON result
-    const resultText = typeof result === 'string' ? result : (result?.text || result?.body?.text || '[]');
-    const submenuItems = JSON.parse(resultText);
-
-    return Array.isArray(submenuItems) ? submenuItems : [];
-  } catch (error) {
-    console.warn(`Warning: Could not discover admin submenu items for ${parentSlug}:`, error.message);
-    return [];
+/**
+ * Discover admin submenu items for a specific parent menu item
+ * @deprecated Use discoverAllAdminSubmenuItems and filter client-side for better performance
+ *
+ * @param {Object} wpInstance - WordPress instance with url property
+ * @param {string} parentSlug - Parent menu slug to filter by
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @returns {Promise<Array<Object>>} Array of submenu items for the specified parent
+ */
+export async function discoverAdminSubmenuItems(wpInstance, parentSlug, page) {
+  if (!page) {
+    throw new Error('Page object is required for admin submenu discovery');
   }
+
+  console.log(`[DEBUG] Discovering admin submenu items for "${parentSlug}" via wp-content/big-mistake-discovery.json`);
+  const data = await loadDiscoveryDataFromFile(page, wpInstance);
+  const allSubmenus = Array.isArray(data.adminSubmenuItems) ? data.adminSubmenuItems : [];
+
+  // Filter by parent slug
+  const submenuItems = allSubmenus.filter((item) => item.parent === parentSlug);
+  console.log(`[DEBUG] Discovery file returned ${submenuItems.length} submenu items for parent "${parentSlug}"`);
+  return submenuItems;
 }
 
 /**
