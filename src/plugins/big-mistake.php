@@ -162,17 +162,33 @@ add_action('http_api_debug', function($response, $context, $class, $args, $url) 
 }, 10, 5);
 
 /**
- * Hard-block requests to api.wordpress.org to avoid slow update checks entirely
+ * Hard-block requests to api.wordpress.org and self-requests to avoid slow update checks and protocol mismatches
+ * Self-requests can cause HPE_INVALID_METHOD errors when WordPress tries HTTPS on an HTTP server
  */
-function big_mistake_block_api_wordpress_org($preempt, $args, $url) {
+function big_mistake_block_problematic_requests($preempt, $args, $url) {
   $host = parse_url($url, PHP_URL_HOST);
-  if ($host && preg_match('/(^|\\.)api\\.wordpress\\.org$/i', $host)) {
+  if (!$host) {
+    return $preempt;
+  }
+
+  // Block api.wordpress.org requests
+  if (preg_match('/(^|\\.)api\\.wordpress\\.org$/i', $host)) {
     return new WP_Error('blocked_api_wordpress_org', 'Blocked api.wordpress.org during tests');
   }
+
+  // Block self-requests (WordPress making HTTP requests to itself)
+  // This prevents HPE_INVALID_METHOD errors from protocol mismatches (HTTPS client, HTTP server)
+  $site_host = parse_url(get_site_url(), PHP_URL_HOST);
+
+  // Match host (ignore port differences - localhost requests are problematic regardless)
+  if ($host === $site_host || $host === '127.0.0.1' || $host === 'localhost') {
+    return new WP_Error('blocked_self_request', 'Blocked self-request during tests to prevent protocol mismatches');
+  }
+
   return $preempt;
 }
 
-add_filter('pre_http_request', 'big_mistake_block_api_wordpress_org', 999, 3);
+add_filter('pre_http_request', 'big_mistake_block_problematic_requests', 999, 3);
 
 /**
  * Disable WordPress update checks that run on admin pages
