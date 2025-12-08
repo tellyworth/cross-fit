@@ -1153,12 +1153,36 @@ export async function testWordPressRSSFeed(page, wpInstance, path, options = {})
  */
 export async function testWordPressAdminPage(page, wpInstance, path, options = {}) {
   const url = normalizePath(wpInstance.url, path);
+  const {
+    allowConsoleErrors = false,
+    allowPageErrors = false,
+    allowPHPErrors = false,
+  } = options;
 
   // Check if page is already closed
   if (page.isClosed()) {
     throw new Error('Page was closed before navigation');
   }
 
+  // Track errors - set up listeners before navigation
+  const consoleErrors = [];
+  const pageErrors = [];
+
+  page.on('console', (msg) => {
+    if (msg.type() === 'error') {
+      consoleErrors.push({
+        text: msg.text(),
+        location: msg.location(),
+      });
+    }
+  });
+
+  page.on('pageerror', (error) => {
+    pageErrors.push({
+      message: error.message,
+      stack: error.stack,
+    });
+  });
 
   // For admin pages, use 'commit' to start navigation quickly, then wait for elements
   // Admin pages have heavy JS that can delay DOMContentLoaded indefinitely
@@ -1257,7 +1281,6 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
   ).toBe(true);
 
   // Check for PHP errors (unless explicitly allowed)
-  const allowPHPErrors = options.allowPHPErrors || false;
   if (!allowPHPErrors && phpErrors.length > 0) {
     console.error('\n[PHP Errors Detected in Admin Page]');
     phpErrors.forEach((err, i) => {
@@ -1269,11 +1292,126 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
     expect(phpErrors).toHaveLength(0);
   }
 
+  // Check for JavaScript console errors (unless explicitly allowed)
+  if (!allowConsoleErrors && consoleErrors.length > 0) {
+    console.error('\n[JavaScript Console Errors Detected in Admin Page]');
+    consoleErrors.forEach((err, i) => {
+      console.error(`  ${i + 1}. ${err.text}`);
+      if (err.location) {
+        console.error(`     Location: ${err.location.url}${err.location.lineNumber ? `:${err.location.lineNumber}` : ''}`);
+      }
+    });
+    expect(consoleErrors).toHaveLength(0);
+  }
+
+  // Check for JavaScript page errors (unless explicitly allowed)
+  if (!allowPageErrors && pageErrors.length > 0) {
+    console.error('\n[JavaScript Page Errors Detected in Admin Page]');
+    pageErrors.forEach((err, i) => {
+      console.error(`  ${i + 1}. ${err.message}`);
+      if (err.stack) {
+        console.error(`     Stack: ${err.stack.split('\n').slice(0, 3).join('\n     ')}`);
+      }
+    });
+    expect(pageErrors).toHaveLength(0);
+  }
+
+  // Check for WordPress dashboard notices
+  let dashboardNotices = [];
+  try {
+    if (!page.isClosed()) {
+      dashboardNotices = await page.evaluate(() => {
+        const notices = [];
+
+        // Find all WordPress admin notices
+        // WordPress uses .notice-error, .notice-warning, .notice-info, .notice-success
+        // They can be .notice.notice-error or just .notice-error
+        const noticeSelectors = [
+          '.notice-error',
+          '.notice-warning',
+          '.notice-info',
+          '.notice-success',
+          '.notice.notice-error',
+          '.notice.notice-warning',
+          '.notice.notice-info',
+          '.notice.notice-success',
+        ];
+
+        noticeSelectors.forEach(selector => {
+          const elements = document.querySelectorAll(selector);
+          elements.forEach(el => {
+            // Get the notice text, excluding dismiss buttons
+            const text = el.innerText.trim();
+            const dismissButton = el.querySelector('.notice-dismiss');
+            const noticeText = dismissButton ? text.replace(dismissButton.innerText, '').trim() : text;
+
+            if (noticeText) {
+              // Determine notice type from classes
+              let type = 'unknown';
+              if (el.classList.contains('notice-error') || selector.includes('error')) {
+                type = 'error';
+              } else if (el.classList.contains('notice-warning') || selector.includes('warning')) {
+                type = 'warning';
+              } else if (el.classList.contains('notice-info') || selector.includes('info')) {
+                type = 'info';
+              } else if (el.classList.contains('notice-success') || selector.includes('success')) {
+                type = 'success';
+              }
+
+              notices.push({
+                type,
+                text: noticeText,
+                html: el.innerHTML,
+              });
+            }
+          });
+        });
+
+        // Remove duplicates (same text and type)
+        const uniqueNotices = [];
+        const seen = new Set();
+        notices.forEach(notice => {
+          const key = `${notice.type}:${notice.text}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            uniqueNotices.push(notice);
+          }
+        });
+
+        return uniqueNotices;
+      });
+    }
+  } catch (err) {
+    console.warn('Error while detecting dashboard notices:', err);
+  }
+
+  // Assert no error notices
+  const errorNotices = dashboardNotices.filter(n => n.type === 'error');
+  if (errorNotices.length > 0) {
+    console.error('\n[WordPress Dashboard Error Notices Detected]');
+    errorNotices.forEach((notice, i) => {
+      console.error(`  ${i + 1}. ${notice.text}`);
+    });
+    expect(errorNotices).toHaveLength(0);
+  }
+
+  // Warn on warning/info/other notices (but don't fail the test)
+  const nonErrorNotices = dashboardNotices.filter(n => n.type !== 'error');
+  if (nonErrorNotices.length > 0) {
+    console.warn('\n[WordPress Dashboard Notices (non-error) Detected]');
+    nonErrorNotices.forEach((notice, i) => {
+      console.warn(`  ${i + 1}. [${notice.type.toUpperCase()}] ${notice.text}`);
+    });
+  }
+
   return {
     response,
     adminCheck,
     isAuthenticated: !isLoginPage,
     phpErrors,
+    consoleErrors,
+    pageErrors,
+    dashboardNotices,
   };
 }
 
