@@ -52,6 +52,9 @@ test.describe('WordPress Public Pages', { tag: '@public' }, () => {
   });
 
   test('should load one example of each post type without errors', async ({ page, wpInstance }) => {
+    // This test accesses multiple pages, so it needs more time
+    test.setTimeout(60000); // 60 seconds for multiple page loads
+
     const isFullMode = process.env.FULL_MODE === '1';
 
     // Discover post types lazily if not already cached
@@ -120,6 +123,9 @@ test.describe('WordPress Public Pages', { tag: '@public' }, () => {
   });
 
   test('should load list pages (archives, search, etc.) without errors', async ({ page, wpInstance }) => {
+    // This test accesses multiple pages, so it needs more time
+    test.setTimeout(60000); // 60 seconds for multiple page loads
+
     const isFullMode = process.env.FULL_MODE === '1';
     let listPages;
 
