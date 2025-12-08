@@ -8,7 +8,7 @@ import {
  * @fileoverview Tests for authenticated WordPress admin pages
  */
 test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
-  test.describe.configure({ mode: 'serial' });
+  //test.describe.configure({ mode: 'serial' });
 
   test('should access authenticated admin dashboard', { tag: '@smoke' }, async ({ page, wpInstance }) => {
     await testWordPressAdminPage(page, wpInstance, '/wp-admin/');
@@ -47,6 +47,8 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
     const baseUrl = wpInstance.url.replace(/\/$/, '');
     const optionsPath = '/wp-admin/options-general.php';
     const optionsUrl = `${baseUrl}${optionsPath}`;
+
+    test.setTimeout(30000);
 
     // Navigate and wait for the form field to be ready
     const optionsResponse = await page.goto(optionsUrl, { waitUntil: 'commit' });
