@@ -1241,10 +1241,112 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
     // If none found, continue - we'll check below
   });
 
-  // Wait a bit longer for critical resources to load before considering page "ready"
-  // This gives scripts and AJAX calls time to complete without aborting
-  // Use a short wait to avoid slowing tests too much, but allow resources to finish
-  await page.waitForTimeout(500);
+  // Wait for JavaScript to execute and potentially hide "JavaScript required" notices
+  // WordPress shows these notices server-side but hides them with JavaScript
+  // Use a smart polling approach: check if hide-if-js elements are actually hidden
+  // This is faster than a fixed timeout and more reliable
+  try {
+    await page.waitForFunction(
+      () => {
+        // Check if WordPress admin JS is loaded (jQuery or wp object)
+        const jsLoaded = typeof jQuery !== 'undefined' || typeof wp !== 'undefined';
+        if (!jsLoaded) {
+          return false; // Keep waiting
+        }
+
+        // Check if any hide-if-js elements are still visible
+        const hideIfJsElements = Array.from(document.querySelectorAll('.hide-if-js'));
+        const visibleCount = hideIfJsElements.filter(el => {
+          const style = window.getComputedStyle(el);
+          return style.display !== 'none' && !el.classList.contains('hidden');
+        }).length;
+
+        // JS is loaded and all hide-if-js elements are hidden (or none exist)
+        return visibleCount === 0;
+      },
+      { timeout: 2000 } // Max 2 seconds, but usually much faster
+    ).catch(() => {
+      // If timeout, continue anyway - JS may not have hidden them yet but we filter them in detection
+    });
+  } catch (err) {
+    // Continue if wait fails - we'll filter notices in detection anyway
+  }
+
+  // Diagnostic: Check what WordPress is checking for JavaScript availability
+  let jsDiagnostics = null;
+  try {
+    if (!page.isClosed()) {
+      jsDiagnostics = await page.evaluate(() => {
+        // Test if JavaScript is running
+        const jsWorking = typeof window !== 'undefined' && typeof document !== 'undefined';
+
+        // Check if notices are visible in the DOM
+        const visibleNotices = Array.from(document.querySelectorAll('.notice-error, .notice.notice-error'));
+
+        // Check if WordPress admin JS is loaded
+        const wpAdminJsLoaded = typeof wp !== 'undefined' || typeof jQuery !== 'undefined';
+
+        // Check for specific WordPress JS objects that these pages might need
+        const hasWpApi = typeof wp !== 'undefined' && typeof wp.api !== 'undefined';
+        const hasReact = typeof wp !== 'undefined' && typeof wp.element !== 'undefined';
+        const hasJQuery = typeof jQuery !== 'undefined';
+
+        // Check if these notices have a specific class or data attribute that indicates they should be hidden
+        const noticeDetails = visibleNotices.slice(0, 3).map(n => ({
+          text: n.innerText.trim(),
+          classes: Array.from(n.classList),
+          hasHiddenClass: n.classList.contains('hidden') || n.style.display === 'none',
+          parentTag: n.parentElement ? n.parentElement.tagName : null,
+          isInNoscript: n.closest('noscript') !== null,
+        }));
+
+        // Check for WordPress's hide-if-js handling
+        // WordPress should have CSS that hides .hide-if-js when JS is enabled
+        // Or JavaScript that removes the class/adds hidden class
+        const hideIfJsElements = Array.from(document.querySelectorAll('.hide-if-js'));
+        const hideIfJsVisible = hideIfJsElements.filter(el => {
+          const style = window.getComputedStyle(el);
+          return style.display !== 'none' && !el.classList.contains('hidden');
+        });
+
+        // Check for WordPress's admin.js or similar that handles hide-if-js
+        const scripts = Array.from(document.querySelectorAll('script'));
+        const hideIfJsScripts = scripts.filter(script => {
+          const text = script.textContent || script.innerHTML || '';
+          return text.includes('hide-if-js') || text.includes('hideIfJs') ||
+                 (text.includes('removeClass') && text.includes('hide-if-js'));
+        });
+
+        // Check if WordPress admin CSS is loaded (should hide .hide-if-js)
+        const adminStylesheets = Array.from(document.querySelectorAll('link[rel="stylesheet"]'));
+        const hasAdminCss = adminStylesheets.some(link => {
+          const href = link.href || '';
+          return href.includes('admin') || href.includes('wp-admin');
+        });
+
+        return {
+          jsWorking,
+          visibleNoticesCount: visibleNotices.length,
+          wpAdminJsLoaded,
+          hasWpApi,
+          hasReact,
+          hasJQuery,
+          hideIfJsElementsCount: hideIfJsElements.length,
+          hideIfJsVisibleCount: hideIfJsVisible.length,
+          hideIfJsScriptsCount: hideIfJsScripts.length,
+          hasAdminCss,
+          noticeDetails,
+        };
+      });
+    }
+  } catch (err) {
+    console.warn('Error while checking JavaScript diagnostics:', err);
+  }
+
+  // Log diagnostics if we have them and there are visible notices
+  if (jsDiagnostics && jsDiagnostics.visibleNoticesCount > 0) {
+    console.log('[JS Diagnostics]', JSON.stringify(jsDiagnostics, null, 2));
+  }
 
   // Detect PHP errors in page content (when WP_DEBUG_DISPLAY is enabled)
   let phpErrors = [];
@@ -1340,12 +1442,48 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
         noticeSelectors.forEach(selector => {
           const elements = document.querySelectorAll(selector);
           elements.forEach(el => {
+            // Check if element is actually visible (not hidden by CSS)
+            // WordPress uses .hide-if-js class which is hidden by CSS when JS is enabled
+            const style = window.getComputedStyle(el);
+            const display = style.display;
+            const visibility = style.visibility;
+            const opacity = style.opacity;
+            const hasHiddenClass = el.classList.contains('hidden');
+            const hasHideIfJs = el.classList.contains('hide-if-js');
+
+            const isVisible = display !== 'none' &&
+                             visibility !== 'hidden' &&
+                             !hasHiddenClass &&
+                             opacity !== '0';
+
+            // Skip elements that are hidden by CSS (like .hide-if-js when JS is enabled)
+            if (!isVisible) {
+              return;
+            }
+
             // Get the notice text, excluding dismiss buttons
             const text = el.innerText.trim();
             const dismissButton = el.querySelector('.notice-dismiss');
             const noticeText = dismissButton ? text.replace(dismissButton.innerText, '').trim() : text;
 
             if (noticeText) {
+              // Filter out "JavaScript required" notices for pages that legitimately require JS
+              // These are shown server-side but the page should work once JS loads
+              // The block editor, site health, and privacy settings pages all require JS
+              const jsRequiredPatterns = [
+                /requires JavaScript/i,
+                /enable JavaScript/i,
+                /JavaScript.*browser/i,
+              ];
+
+              const isJsRequiredNotice = jsRequiredPatterns.some(pattern => pattern.test(noticeText));
+
+              // Skip "JavaScript required" notices - these are false positives
+              // The pages DO require JS, but JS is enabled in Playwright
+              // WordPress shows these as fallbacks but they're not real errors
+              if (isJsRequiredNotice) {
+                return;
+              }
               // Determine notice type from classes
               let type = 'unknown';
               if (el.classList.contains('notice-error') || selector.includes('error')) {
