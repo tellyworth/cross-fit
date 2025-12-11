@@ -354,19 +354,37 @@ file_put_contents($log_path, $header, FILE_APPEND | LOCK_EX);
     console.warn('Warning: Failed to install Big Mistake plugin:', error.message);
   }
 
+  // Set up console.debug override: only output in debug mode
+  const isDebugMode = process.env.DEBUG === '1';
+  const originalDebug = console.debug;
+  console.debug = (...args) => {
+    if (isDebugMode) {
+      originalDebug(...args);
+    }
+    // In non-debug mode, console.debug is a no-op (silent)
+  };
+
   // Listen for errors from the HTTP server
   // The server property is a Node.js HTTP Server which extends EventEmitter
   // It emits 'error' events when server errors occur (port binding, etc.)
   // It emits 'clientError' events for client connection errors
-  // Note: We log all errors including ECONNRESET/EPIPE to see all Playground output
-  // ECONNRESET is common during tests but visible output helps with debugging
+  // ECONNRESET/EPIPE are expected when tests navigate away before assets finish loading
   if (cliServer.server && typeof cliServer.server.on === 'function') {
     cliServer.server.on('error', (error) => {
       console.error('[WordPress Playground Server Error]', error);
     });
 
     cliServer.server.on('clientError', (error, socket) => {
-      console.error('[WordPress Playground Client Error]', error);
+      // ECONNRESET and EPIPE are common during tests when pages navigate away
+      // before assets finish loading - these are expected and not real errors
+      // Use debug() for these, error() for all other client errors
+      const isExpectedError = error.code === 'ECONNRESET' || error.code === 'EPIPE';
+
+      if (isExpectedError) {
+        console.debug('[WordPress Playground Client Error]', error);
+      } else {
+        console.error('[WordPress Playground Client Error]', error);
+      }
     });
   }
 
