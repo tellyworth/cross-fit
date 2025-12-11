@@ -1393,8 +1393,37 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
     console.warn('Error while detecting dashboard notices:', err);
   }
 
-  // Assert no error notices
-  const errorNotices = dashboardNotices.filter(n => n.type === 'error');
+  // Page-specific notice whitelist - expected notices on specific pages
+  const noticeWhitelist = {
+    '/wp-admin/theme-editor.php': [
+      { type: 'warning', pattern: /minified version.*stylesheet/i },
+      { type: 'info', pattern: /edit and live preview CSS/i },
+      { type: 'info', pattern: /^Stylesheet$/i },
+    ],
+    '/wp-admin/plugin-editor.php': [
+      { type: 'info', pattern: /\.php$/i }, // Plugin filename notices (e.g., "akismet.php")
+    ],
+  };
+
+  // Filter out whitelisted notices
+  const filteredNotices = dashboardNotices.filter(notice => {
+    const pageWhitelist = noticeWhitelist[path];
+    if (!pageWhitelist) {
+      return true; // No whitelist for this page, keep all notices
+    }
+
+    // Check if this notice matches any whitelist entry for this page
+    const isWhitelisted = pageWhitelist.some(entry => {
+      const typeMatches = entry.type === notice.type || entry.type === 'unknown';
+      const patternMatches = entry.pattern.test(notice.text || '');
+      return typeMatches && patternMatches;
+    });
+
+    return !isWhitelisted; // Keep notices that are NOT whitelisted
+  });
+
+  // Assert no error notices (after filtering)
+  const errorNotices = filteredNotices.filter(n => n.type === 'error');
   if (errorNotices.length > 0) {
     console.error(`\n[WordPress Dashboard Error Notices Detected] (${path})`);
     errorNotices.forEach((notice, i) => {
@@ -1404,11 +1433,21 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
   }
 
   // Warn on warning/info/other notices (but don't fail the test)
-  const nonErrorNotices = dashboardNotices.filter(n => n.type !== 'error');
+  const nonErrorNotices = filteredNotices.filter(n => n.type !== 'error');
   if (nonErrorNotices.length > 0) {
     console.warn(`\n[WordPress Dashboard Notices (non-error) Detected] (${path})`);
     nonErrorNotices.forEach((notice, i) => {
-      console.warn(`  ${i + 1}. [${notice.type.toUpperCase()}] ${notice.text}`);
+      // If text is very short (like just a filename) or empty, show HTML snippet for context
+      const textDisplay = notice.text || '(no text)';
+      const htmlSnippet = notice.html ? notice.html.substring(0, 200).replace(/\s+/g, ' ') : '';
+
+      if (notice.text && notice.text.length < 20 && htmlSnippet && htmlSnippet.length > notice.text.length) {
+        // Text is short but HTML has more content - show both
+        console.warn(`  ${i + 1}. [${notice.type.toUpperCase()}] ${textDisplay}`);
+        console.warn(`      HTML: ${htmlSnippet}${htmlSnippet.length >= 200 ? '...' : ''}`);
+      } else {
+        console.warn(`  ${i + 1}. [${notice.type.toUpperCase()}] ${textDisplay}`);
+      }
     });
   }
 
