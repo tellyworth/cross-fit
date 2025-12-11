@@ -72,7 +72,8 @@ npm test -- --import=./export.xml --theme=twentytwentyfour --plugin=akismet,jetp
 
 #### Running All Tests
 
-- `npm test` - Run all tests in headless mode
+- `npm test` - Run standard tests in headless mode
+- `npm run test:full` - Run expanded tests on every public and admin page
 - `npm run test:ui` - Run tests with Playwright UI mode (interactive)
 - `npm run test:headed` - Run tests with visible browser window
 
