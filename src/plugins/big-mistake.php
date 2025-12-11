@@ -292,6 +292,17 @@ function big_mistake_write_discovery_file() {
 // admin_head runs after admin_menu, so $menu and $submenu are populated.
 add_action('admin_head', 'big_mistake_write_discovery_file', 20);
 
+// Also try to write it on admin_init (earlier) - menus might not be fully populated yet,
+// but this ensures the file exists earlier for parallel test execution
+// admin_head will update it with complete data later
+add_action('admin_init', function() {
+  // Only write if file doesn't exist yet (to avoid race conditions)
+  $file_path = WP_CONTENT_DIR . '/big-mistake-discovery.json';
+  if (!file_exists($file_path)) {
+    big_mistake_write_discovery_file();
+  }
+}, 999);
+
 /**
  * Discover public post types
  */
@@ -561,5 +572,6 @@ function big_mistake_shutdown_handler() {
 }
 // Register shutdown handler to catch fatal errors
 register_shutdown_function('big_mistake_shutdown_handler');
+
 
 
