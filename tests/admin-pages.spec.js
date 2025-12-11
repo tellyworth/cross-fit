@@ -78,7 +78,7 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
     expect(savedTagline).toBe(newTagline);
   });
 
-  test('should access all top-level admin menu items without errors', async ({ page, wpInstance }) => {
+  test('should access all admin menu items without errors', async ({ page, wpInstance }) => {
     // This test accesses multiple admin pages, so it needs more time
     test.setTimeout(60000); // 60 seconds for multiple page loads
 
