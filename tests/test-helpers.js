@@ -1319,7 +1319,6 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
             const visibility = style.visibility;
             const opacity = style.opacity;
             const hasHiddenClass = el.classList.contains('hidden');
-            const hasHideIfJs = el.classList.contains('hide-if-js');
 
             const isVisible = display !== 'none' &&
                              visibility !== 'hidden' &&
@@ -1337,23 +1336,6 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
             const noticeText = dismissButton ? text.replace(dismissButton.innerText, '').trim() : text;
 
             if (noticeText) {
-              // Filter out "JavaScript required" notices for pages that legitimately require JS
-              // These are shown server-side but the page should work once JS loads
-              // The block editor, site health, and privacy settings pages all require JS
-              const jsRequiredPatterns = [
-                /requires JavaScript/i,
-                /enable JavaScript/i,
-                /JavaScript.*browser/i,
-              ];
-
-              const isJsRequiredNotice = jsRequiredPatterns.some(pattern => pattern.test(noticeText));
-
-              // Skip "JavaScript required" notices - these are false positives
-              // The pages DO require JS, but JS is enabled in Playwright
-              // WordPress shows these as fallbacks but they're not real errors
-              if (isJsRequiredNotice) {
-                return;
-              }
               // Determine notice type from classes
               let type = 'unknown';
               if (el.classList.contains('notice-error') || selector.includes('error')) {
@@ -1402,6 +1384,12 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
     ],
     '/wp-admin/plugin-editor.php': [
       { type: 'info', pattern: /\.php$/i }, // Plugin filename notices (e.g., "akismet.php")
+    ],
+    '/wp-admin/post-new.php': [
+      { type: 'error', pattern: /block editor requires JavaScript/i },
+    ],
+    '/wp-admin/post-new.php?post_type=page': [
+      { type: 'error', pattern: /block editor requires JavaScript/i },
     ],
   };
 
