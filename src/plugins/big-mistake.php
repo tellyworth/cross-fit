@@ -289,8 +289,7 @@ function big_mistake_write_discovery_file() {
 }
 
 // Generate discovery file on admin requests after menus and submenus are built.
-// admin_head runs after admin_menu, so $menu and $submenu are populated.
-add_action('admin_head', 'big_mistake_write_discovery_file', 20);
+add_action('admin_menu', 'big_mistake_write_discovery_file', PHP_INT_MAX);
 
 // Also try to write it on admin_init (earlier) - menus might not be fully populated yet,
 // but this ensures the file exists earlier for parallel test execution
