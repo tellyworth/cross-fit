@@ -2,6 +2,10 @@
 
 A minimal end-to-end testing tool for WordPress using WordPress Playground.
 
+Cross-Fit is intended to help answer the question "will changing (this thing) break my WordPress site?" - where "this thing" might be upgrading core, installing a new plugin, switching themes, etc.
+
+It's designed to catch things like PHP and JS errors, especially those that might appear only on one page of a site.
+
 ## Overview
 
 This MVP demonstrates feasibility of using WordPress Playground for E2E testing. It spins up a local WordPress instance, makes HTTP requests to it, and validates basic functionality.
