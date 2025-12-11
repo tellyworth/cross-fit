@@ -52,14 +52,16 @@ async function globalSetup() {
     const page = await context.newPage();
 
     // Navigate to admin dashboard - this triggers the discovery file creation
-    const adminUrl = `${wpInstance.url}/wp-admin/`;
+    // Normalize URL to avoid double slashes
+    const baseUrl = wpInstance.url.replace(/\/$/, ''); // Remove trailing slash if present
+    const adminUrl = `${baseUrl}/wp-admin/`;
     await page.goto(adminUrl, { waitUntil: 'commit', timeout: 30000 });
 
     // Wait for the discovery file to be written
     await page.waitForTimeout(2000);
 
     // Verify the discovery file exists
-    const discoveryUrl = `${wpInstance.url}/wp-content/big-mistake-discovery.json`;
+    const discoveryUrl = `${baseUrl}/wp-content/big-mistake-discovery.json`;
     const discoveryResponse = await page.request.get(discoveryUrl);
 
     if (discoveryResponse.status() === 200) {
