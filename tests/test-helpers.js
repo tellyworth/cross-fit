@@ -323,8 +323,6 @@ export async function discoverPostTypesFetch(baseUrl) {
   // Parse the base URL to extract host
   const urlObj = new URL(baseUrl);
   const url = `${baseUrl.replace(/\/$/, '')}/wp-json/wp/v2/types`;
-  console.log(`[DEBUG] Fetching post types from: ${url}`);
-  console.log(`[DEBUG] Base URL object - host: ${urlObj.host}, hostname: ${urlObj.hostname}, port: ${urlObj.port}`);
 
   const fetchOptions = {
     method: 'GET',
@@ -333,45 +331,32 @@ export async function discoverPostTypesFetch(baseUrl) {
       'User-Agent': 'cross-fit-test-tool/1.0',
       'Host': urlObj.host, // Set Host header explicitly
     },
-    redirect: 'manual', // Handle redirects manually to debug
+    redirect: 'manual', // Handle redirects manually
   };
-
-  console.log(`[DEBUG] Post types fetch options:`, JSON.stringify(fetchOptions, null, 2));
 
   let response;
   try {
     response = await fetch(url, fetchOptions);
-    console.log(`[DEBUG] Post types response status: ${response.status} ${response.statusText}`);
-    console.log(`[DEBUG] Post types response URL: ${response.url}`);
-    console.log(`[DEBUG] Post types response headers:`, Object.fromEntries(response.headers.entries()));
 
-    // Handle redirect manually to see what's happening
+    // Handle redirect manually
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get('location');
-      console.log(`[DEBUG] Post types redirect location header: ${location}`);
-      console.log(`[DEBUG] Post types all response headers:`, Array.from(response.headers.entries()));
 
       if (location) {
         // Resolve relative URLs
         const redirectUrl = location.startsWith('http') ? location : new URL(location, baseUrl).toString();
-        console.log(`[DEBUG] Post types following redirect to: ${redirectUrl}`);
 
         // Try with trailing slash if redirect is to same path
         let redirectUrlToTry = redirectUrl;
         if (redirectUrl === url && !url.endsWith('/')) {
           redirectUrlToTry = url + '/';
-          console.log(`[DEBUG] Post types trying with trailing slash: ${redirectUrlToTry}`);
         }
 
         // Only follow one redirect to avoid loops
         const redirectResponse = await fetch(redirectUrlToTry, { ...fetchOptions, redirect: 'manual' });
-        console.log(`[DEBUG] Post types after redirect status: ${redirectResponse.status}`);
-        console.log(`[DEBUG] Post types after redirect URL: ${redirectResponse.url}`);
-        console.log(`[DEBUG] Post types after redirect headers:`, Object.fromEntries(redirectResponse.headers.entries()));
 
         if (redirectResponse.status >= 300 && redirectResponse.status < 400) {
           const redirectLocation = redirectResponse.headers.get('location');
-          console.error(`[DEBUG] Post types redirect loop detected! Redirected to: ${redirectLocation}`);
           throw new Error(`Redirect loop detected: ${url} -> ${redirectUrlToTry} -> ${redirectLocation}`);
         }
 
@@ -379,26 +364,17 @@ export async function discoverPostTypesFetch(baseUrl) {
       }
     }
   } catch (error) {
-    console.error(`[DEBUG] Post types fetch error:`, error);
-    console.error(`[DEBUG] Error name: ${error.name}, message: ${error.message}`);
-    if (error.cause) {
-      console.error(`[DEBUG] Error cause:`, error.cause);
-    }
     throw error;
   }
 
   if (!response.ok) {
-    const errorText = await response.text().catch(() => 'Could not read response body');
-    console.error(`[DEBUG] Post types response not OK. Status: ${response.status}, Final URL: ${response.url}, Body: ${errorText.substring(0, 200)}`);
     throw new Error(`Failed to fetch post types: HTTP ${response.status} ${response.statusText}`);
   }
 
   let data;
   try {
     data = await response.json();
-    console.log(`[DEBUG] Post types data keys: ${Object.keys(data).join(', ')}`);
   } catch (error) {
-    console.error(`[DEBUG] Post types JSON parse error:`, error);
     throw new Error(`Failed to parse post types JSON: ${error.message}`);
   }
 
@@ -417,7 +393,6 @@ export async function discoverPostTypesFetch(baseUrl) {
     }
   }
 
-  console.log(`[DEBUG] Discovered ${postTypes.length} post types: ${postTypes.map(pt => pt.slug).join(', ')}`);
   return postTypes;
 }
 
@@ -435,7 +410,6 @@ export async function discoverPostTypes(page, wpInstance) {
     const postTypes = Array.isArray(data.postTypes) ? data.postTypes : [];
     return postTypes;
   } catch (error) {
-    console.error('[DEBUG] Error discovering post types from discovery file:', error.message);
     throw error;
   }
 }
@@ -604,19 +578,14 @@ export async function discoverListPageTypesFetch(baseUrl) {
   // Discover categories
   try {
     const url = `${base}/wp-json/wp/v2/categories?per_page=1&hide_empty=false`;
-    console.log(`[DEBUG] Fetching categories from: ${url}`);
-    const fetchOptions = {
+    const response = await fetch(url, {
       method: 'GET',
       headers: {
         'Accept': 'application/json',
         'User-Agent': 'cross-fit-test-tool/1.0',
       },
       redirect: 'follow',
-    };
-    console.log(`[DEBUG] Categories fetch options:`, JSON.stringify(fetchOptions, null, 2));
-    const response = await fetch(url, fetchOptions);
-    console.log(`[DEBUG] Categories response status: ${response.status}, final URL: ${response.url}`);
-    console.log(`[DEBUG] Categories response headers:`, Object.fromEntries(response.headers.entries()));
+    });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
@@ -629,16 +598,13 @@ export async function discoverListPageTypesFetch(baseUrl) {
       }));
     }
   } catch (error) {
-    console.error(`[DEBUG] Categories fetch error:`, error);
     throw error;
   }
 
   // Discover tags
   try {
     const url = `${base}/wp-json/wp/v2/tags?per_page=1&hide_empty=false`;
-    console.log(`[DEBUG] Fetching tags from: ${url}`);
     const response = await fetch(url, { redirect: 'follow' });
-    console.log(`[DEBUG] Tags response status: ${response.status}, final URL: ${response.url}`);
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
@@ -651,16 +617,13 @@ export async function discoverListPageTypesFetch(baseUrl) {
       }));
     }
   } catch (error) {
-    console.error(`[DEBUG] Tags fetch error:`, error);
     throw error;
   }
 
   // Discover authors
   try {
     const url = `${base}/wp-json/wp/v2/users?per_page=1`;
-    console.log(`[DEBUG] Fetching authors from: ${url}`);
     const response = await fetch(url, { redirect: 'follow' });
-    console.log(`[DEBUG] Authors response status: ${response.status}, final URL: ${response.url}`);
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
@@ -673,16 +636,13 @@ export async function discoverListPageTypesFetch(baseUrl) {
       }));
     }
   } catch (error) {
-    console.error(`[DEBUG] Authors fetch error:`, error);
     throw error;
   }
 
   // Discover date archives
   try {
     const url = `${base}/wp-json/wp/v2/posts?per_page=1&status=publish`;
-    console.log(`[DEBUG] Fetching posts for date archives from: ${url}`);
     const response = await fetch(url, { redirect: 'follow' });
-    console.log(`[DEBUG] Posts response status: ${response.status}, final URL: ${response.url}`);
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
@@ -700,16 +660,13 @@ export async function discoverListPageTypesFetch(baseUrl) {
       }
     }
   } catch (error) {
-    console.error(`[DEBUG] Date archives fetch error:`, error);
     throw error;
   }
 
   // Discover custom post type archives
   try {
     const url = `${base}/wp-json/wp/v2/types`;
-    console.log(`[DEBUG] Fetching types for CPT archives from: ${url}`);
     const response = await fetch(url, { redirect: 'follow' });
-    console.log(`[DEBUG] Types response status: ${response.status}, final URL: ${response.url}`);
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
@@ -727,7 +684,6 @@ export async function discoverListPageTypesFetch(baseUrl) {
       }
     }
   } catch (error) {
-    console.error(`[DEBUG] CPT archives fetch error:`, error);
     throw error;
   }
 
@@ -745,7 +701,6 @@ export async function discoverListPageTypesFetch(baseUrl) {
  * @returns {Promise<Object>} Object with different list page types and examples
  */
 export async function discoverListPageTypes(page, wpInstance) {
-  console.log('[DEBUG] Discovering list pages via wp-content/big-mistake-discovery.json');
   try {
     const data = await loadDiscoveryDataFromFile(page, wpInstance);
     const rawListPages = data.listPages || {};
@@ -805,7 +760,6 @@ export async function discoverListPageTypes(page, wpInstance) {
 
     return listPages;
   } catch (error) {
-    console.error('[DEBUG] Error discovering list pages from discovery file:', error.message);
     throw error;
   }
 }
@@ -974,14 +928,11 @@ export async function discoverAdminMenuItems(wpInstance, page = null) {
     throw new Error('Page object is required for admin menu discovery');
   }
 
-  console.log('[DEBUG] Discovering admin menu items via wp-content/big-mistake-discovery.json');
   try {
     const data = await loadDiscoveryDataFromFile(page, wpInstance);
     const adminMenuItems = Array.isArray(data.adminMenuItems) ? data.adminMenuItems : [];
-    console.log(`[DEBUG] Discovery file returned ${adminMenuItems.length} admin menu items`);
     return adminMenuItems;
   } catch (error) {
-    console.error('[DEBUG] Error discovering admin menu items from discovery file:', error.message);
     throw error;
   }
 }
@@ -1003,7 +954,6 @@ async function loadDiscoveryDataFromFile(page, wpInstance) {
   }
 
   const url = normalizePath(wpInstance.url, '/wp-content/big-mistake-discovery.json');
-  console.log(`[DEBUG] Fetching discovery data from ${url}`);
 
   const response = await page.request.get(url, {
     headers: {
@@ -1049,10 +999,8 @@ export async function discoverAllAdminSubmenuItems(wpInstance, page) {
     throw new Error('Page object is required for admin submenu discovery');
   }
 
-  console.log(`[DEBUG] Discovering all admin submenu items via wp-content/big-mistake-discovery.json`);
   const data = await loadDiscoveryDataFromFile(page, wpInstance);
   const allSubmenus = Array.isArray(data.adminSubmenuItems) ? data.adminSubmenuItems : [];
-  console.log(`[DEBUG] Discovery file returned ${allSubmenus.length} total submenu items`);
   return allSubmenus;
 }
 
@@ -1070,13 +1018,11 @@ export async function discoverAdminSubmenuItems(wpInstance, parentSlug, page) {
     throw new Error('Page object is required for admin submenu discovery');
   }
 
-  console.log(`[DEBUG] Discovering admin submenu items for "${parentSlug}" via wp-content/big-mistake-discovery.json`);
   const data = await loadDiscoveryDataFromFile(page, wpInstance);
   const allSubmenus = Array.isArray(data.adminSubmenuItems) ? data.adminSubmenuItems : [];
 
   // Filter by parent slug
   const submenuItems = allSubmenus.filter((item) => item.parent === parentSlug);
-  console.log(`[DEBUG] Discovery file returned ${submenuItems.length} submenu items for parent "${parentSlug}"`);
   return submenuItems;
 }
 
@@ -1270,82 +1216,6 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
     });
   } catch (err) {
     // Continue if wait fails - we'll filter notices in detection anyway
-  }
-
-  // Diagnostic: Check what WordPress is checking for JavaScript availability
-  let jsDiagnostics = null;
-  try {
-    if (!page.isClosed()) {
-      jsDiagnostics = await page.evaluate(() => {
-        // Test if JavaScript is running
-        const jsWorking = typeof window !== 'undefined' && typeof document !== 'undefined';
-
-        // Check if notices are visible in the DOM
-        const visibleNotices = Array.from(document.querySelectorAll('.notice-error, .notice.notice-error'));
-
-        // Check if WordPress admin JS is loaded
-        const wpAdminJsLoaded = typeof wp !== 'undefined' || typeof jQuery !== 'undefined';
-
-        // Check for specific WordPress JS objects that these pages might need
-        const hasWpApi = typeof wp !== 'undefined' && typeof wp.api !== 'undefined';
-        const hasReact = typeof wp !== 'undefined' && typeof wp.element !== 'undefined';
-        const hasJQuery = typeof jQuery !== 'undefined';
-
-        // Check if these notices have a specific class or data attribute that indicates they should be hidden
-        const noticeDetails = visibleNotices.slice(0, 3).map(n => ({
-          text: n.innerText.trim(),
-          classes: Array.from(n.classList),
-          hasHiddenClass: n.classList.contains('hidden') || n.style.display === 'none',
-          parentTag: n.parentElement ? n.parentElement.tagName : null,
-          isInNoscript: n.closest('noscript') !== null,
-        }));
-
-        // Check for WordPress's hide-if-js handling
-        // WordPress should have CSS that hides .hide-if-js when JS is enabled
-        // Or JavaScript that removes the class/adds hidden class
-        const hideIfJsElements = Array.from(document.querySelectorAll('.hide-if-js'));
-        const hideIfJsVisible = hideIfJsElements.filter(el => {
-          const style = window.getComputedStyle(el);
-          return style.display !== 'none' && !el.classList.contains('hidden');
-        });
-
-        // Check for WordPress's admin.js or similar that handles hide-if-js
-        const scripts = Array.from(document.querySelectorAll('script'));
-        const hideIfJsScripts = scripts.filter(script => {
-          const text = script.textContent || script.innerHTML || '';
-          return text.includes('hide-if-js') || text.includes('hideIfJs') ||
-                 (text.includes('removeClass') && text.includes('hide-if-js'));
-        });
-
-        // Check if WordPress admin CSS is loaded (should hide .hide-if-js)
-        const adminStylesheets = Array.from(document.querySelectorAll('link[rel="stylesheet"]'));
-        const hasAdminCss = adminStylesheets.some(link => {
-          const href = link.href || '';
-          return href.includes('admin') || href.includes('wp-admin');
-        });
-
-        return {
-          jsWorking,
-          visibleNoticesCount: visibleNotices.length,
-          wpAdminJsLoaded,
-          hasWpApi,
-          hasReact,
-          hasJQuery,
-          hideIfJsElementsCount: hideIfJsElements.length,
-          hideIfJsVisibleCount: hideIfJsVisible.length,
-          hideIfJsScriptsCount: hideIfJsScripts.length,
-          hasAdminCss,
-          noticeDetails,
-        };
-      });
-    }
-  } catch (err) {
-    console.warn('Error while checking JavaScript diagnostics:', err);
-  }
-
-  // Log diagnostics if we have them and there are visible notices
-  if (jsDiagnostics && jsDiagnostics.visibleNoticesCount > 0) {
-    console.log('[JS Diagnostics]', JSON.stringify(jsDiagnostics, null, 2));
   }
 
   // Detect PHP errors in page content (when WP_DEBUG_DISPLAY is enabled)
