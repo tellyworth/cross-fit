@@ -38,12 +38,6 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
 
     expect(optionsResponse.status()).toBe(200);
 
-    // Wait briefly for network to settle (allows critical resources to load)
-    // Timeout is longer under parallel load - network may be busy
-    await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {
-      // Ignore timeout - network may not become fully idle, but page is functional
-    });
-
     // Wait for the form field - this ensures the page is fully loaded and interactive
     await expect(page.locator('#blogdescription')).toBeVisible({ timeout: 15000 });
 
@@ -62,15 +56,6 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
     // Wait for form submission - wait for navigation and then for the field to be visible again
     // The field being visible indicates the page has reloaded after form submission
     await expect(page.locator('#blogdescription')).toBeVisible({ timeout: 15000 });
-
-    // Wait briefly for network to settle after form submission
-    // Timeout is longer under parallel load - network may be busy
-    await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {
-      // Ignore timeout - network may not become fully idle, but page is functional
-    });
-
-    // Wait a moment for the save to complete
-    await page.waitForTimeout(1000);
 
     // Check if the change was saved by reading the value again
     const savedTagline = await page.inputValue('#blogdescription');
