@@ -1266,7 +1266,7 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
 
   // Check for JavaScript console errors (unless explicitly allowed)
   if (!allowConsoleErrors && consoleErrors.length > 0) {
-    console.error('\n[JavaScript Console Errors Detected in Admin Page]');
+    console.error(`\n[JavaScript Console Errors Detected in Admin Page] (${path})`);
     consoleErrors.forEach((err, i) => {
       console.error(`  ${i + 1}. ${err.text}`);
       if (err.location) {
@@ -1278,7 +1278,7 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
 
   // Check for JavaScript page errors (unless explicitly allowed)
   if (!allowPageErrors && pageErrors.length > 0) {
-    console.error('\n[JavaScript Page Errors Detected in Admin Page]');
+    console.error(`\n[JavaScript Page Errors Detected in Admin Page] (${path})`);
     pageErrors.forEach((err, i) => {
       console.error(`  ${i + 1}. ${err.message}`);
       if (err.stack) {
@@ -1396,7 +1396,7 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
   // Assert no error notices
   const errorNotices = dashboardNotices.filter(n => n.type === 'error');
   if (errorNotices.length > 0) {
-    console.error('\n[WordPress Dashboard Error Notices Detected]');
+    console.error(`\n[WordPress Dashboard Error Notices Detected] (${path})`);
     errorNotices.forEach((notice, i) => {
       console.error(`  ${i + 1}. ${notice.text}`);
     });
@@ -1406,7 +1406,7 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
   // Warn on warning/info/other notices (but don't fail the test)
   const nonErrorNotices = dashboardNotices.filter(n => n.type !== 'error');
   if (nonErrorNotices.length > 0) {
-    console.warn('\n[WordPress Dashboard Notices (non-error) Detected]');
+    console.warn(`\n[WordPress Dashboard Notices (non-error) Detected] (${path})`);
     nonErrorNotices.forEach((notice, i) => {
       console.warn(`  ${i + 1}. [${notice.type.toUpperCase()}] ${notice.text}`);
     });
