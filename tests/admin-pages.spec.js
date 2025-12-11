@@ -12,11 +12,6 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
 
   test('should access authenticated admin dashboard', { tag: '@smoke' }, async ({ page, wpInstance }) => {
     await testWordPressAdminPage(page, wpInstance, '/wp-admin/');
-    // Wait briefly for network to settle (allows critical resources to load)
-    // Timeout is longer under parallel load - network may be busy
-    await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {
-      // Ignore timeout - network may not become fully idle, but page is functional
-    });
   });
 
   test('should access multiple admin pages', async ({ page, wpInstance }) => {
@@ -25,18 +20,7 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
     // Extend timeout after first page to allow for additional pages
     test.setTimeout(test.info().timeout + 30000); // Add 30 seconds
 
-    // Wait briefly for network to settle (allows critical resources to load)
-    // Timeout is longer under parallel load - network may be busy
-    await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {
-      // Ignore timeout - network may not become fully idle, but page is functional
-    });
-
     await testWordPressAdminPage(page, wpInstance, '/wp-admin/options-general.php');
-    // Wait briefly for network to settle (allows critical resources to load)
-    // Timeout is longer under parallel load - network may be busy
-    await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {
-      // Ignore timeout - network may not become fully idle, but page is functional
-    });
     // Add more admin pages easily:
     // await testWordPressAdminPage(page, wpInstance, '/wp-admin/edit.php');
     // await testWordPressAdminPage(page, wpInstance, '/wp-admin/upload.php');
@@ -139,12 +123,6 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
           timeout: 10000, // 10 seconds per page instead of default 20
         });
 
-        // Wait for network to be idle to ensure all resources (especially JS files) finish loading
-        // This prevents ECONNRESET errors by ensuring all requests complete before moving on
-        await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {
-          // Ignore timeout - network may not become fully idle, but page is functional
-        });
-
         // After successful page load, extend timeout for remaining items
         test.setTimeout(test.info().timeout + timeoutExtensionPerItem);
       } catch (error) {
@@ -168,11 +146,6 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
             await testWordPressAdminPage(page, wpInstance, submenuPath, {
               description: `Admin submenu: ${submenuItem.title} (${submenuItem.slug})`,
               timeout: 10000, // 10 seconds per page
-            });
-
-            // Wait for network to be idle
-            await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {
-              // Ignore timeout - network may not become fully idle, but page is functional
             });
 
             // After successful submenu page load, extend timeout
