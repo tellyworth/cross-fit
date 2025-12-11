@@ -1398,7 +1398,7 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
     '/wp-admin/theme-editor.php': [
       { type: 'warning', pattern: /minified version.*stylesheet/i },
       { type: 'info', pattern: /edit and live preview CSS/i },
-      { type: 'info', pattern: /^Stylesheet$/i },
+      { type: 'info', pattern: /[(]style[.]css[)]/i },
     ],
     '/wp-admin/plugin-editor.php': [
       { type: 'info', pattern: /\.php$/i }, // Plugin filename notices (e.g., "akismet.php")
