@@ -499,6 +499,12 @@ function big_mistake_discover_admin_submenu_items() {
     return $submenu_items;
   }
 
+  // Deprecated taxonomies/features that should be excluded
+  // link_category is from the deprecated Links feature (removed in WP 5.0)
+  $deprecated_patterns = array(
+    'link_category', // Deprecated Links feature taxonomy
+  );
+
   foreach ($submenu as $parent_slug => $items) {
     if (!is_array($items)) {
       continue;
@@ -512,6 +518,18 @@ function big_mistake_discover_admin_submenu_items() {
 
       $menu_slug  = $item[2];
       $menu_title = $item[0];
+
+      // Skip deprecated taxonomies/features
+      $is_deprecated = false;
+      foreach ($deprecated_patterns as $pattern) {
+        if (strpos($menu_slug, $pattern) !== false) {
+          $is_deprecated = true;
+          break;
+        }
+      }
+      if ($is_deprecated) {
+        continue;
+      }
 
       // Extract title text (may contain HTML)
       $title_text = wp_strip_all_tags($menu_title);
