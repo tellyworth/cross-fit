@@ -1338,20 +1338,19 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
             if (noticeText) {
               // Determine notice type from classes
               let type = 'unknown';
-              if (el.classList.contains('notice-error') || selector.includes('error')) {
+              if (el.classList.contains('notice-error')) {
                 type = 'error';
-              } else if (el.classList.contains('notice-warning') || selector.includes('warning')) {
+              } else if (el.classList.contains('notice-warning')) {
                 type = 'warning';
-              } else if (el.classList.contains('notice-info') || selector.includes('info')) {
+              } else if (el.classList.contains('notice-info')) {
                 type = 'info';
-              } else if (el.classList.contains('notice-success') || selector.includes('success')) {
+              } else if (el.classList.contains('notice-success')) {
                 type = 'success';
               }
 
               notices.push({
                 type,
                 text: noticeText,
-                html: el.innerHTML,
               });
             }
           });
@@ -1425,17 +1424,8 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
   if (nonErrorNotices.length > 0) {
     console.warn(`\n[WordPress Dashboard Notices (non-error) Detected] (${path})`);
     nonErrorNotices.forEach((notice, i) => {
-      // If text is very short (like just a filename) or empty, show HTML snippet for context
       const textDisplay = notice.text || '(no text)';
-      const htmlSnippet = notice.html ? notice.html.substring(0, 200).replace(/\s+/g, ' ') : '';
-
-      if (notice.text && notice.text.length < 20 && htmlSnippet && htmlSnippet.length > notice.text.length) {
-        // Text is short but HTML has more content - show both
-        console.warn(`  ${i + 1}. [${notice.type.toUpperCase()}] ${textDisplay}`);
-        console.warn(`      HTML: ${htmlSnippet}${htmlSnippet.length >= 200 ? '...' : ''}`);
-      } else {
-        console.warn(`  ${i + 1}. [${notice.type.toUpperCase()}] ${textDisplay}`);
-      }
+      console.warn(`  ${i + 1}. [${notice.type.toUpperCase()}] ${textDisplay}`);
     });
   }
 
