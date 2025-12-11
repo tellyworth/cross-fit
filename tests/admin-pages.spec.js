@@ -8,7 +8,6 @@ import {
  * @fileoverview Tests for authenticated WordPress admin pages
  */
 test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
-  test.describe.configure({ mode: 'serial' });
 
   test('should access authenticated admin dashboard', { tag: '@smoke' }, async ({ page, wpInstance }) => {
     await testWordPressAdminPage(page, wpInstance, '/wp-admin/');
