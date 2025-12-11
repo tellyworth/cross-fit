@@ -8,6 +8,27 @@ import { testWordPressAdminPage } from './test-helpers.js';
  */
 test.describe('Discovery File', { tag: '@internal' }, () => {
 
+  test('should be created during global setup', async ({ page, wpInstance }) => {
+    // This test verifies that the discovery file exists immediately after global setup
+    // without needing to visit an admin page first
+    const baseUrl = wpInstance.url.replace(/\/$/, '');
+    const discoveryUrl = `${baseUrl}/wp-content/big-mistake-discovery.json`;
+
+    const response = await page.request.get(discoveryUrl, {
+      headers: {
+        Accept: 'application/json',
+      },
+    });
+
+    // The file should exist if global setup worked correctly
+    expect(response.status()).toBe(200);
+
+    const data = await response.json();
+    expect(data).toBeDefined();
+    expect(Array.isArray(data.adminMenuItems)).toBe(true);
+    expect(data.adminMenuItems.length).toBeGreaterThan(0);
+  });
+
   test('should generate and contain valid discovery data', async ({ page, wpInstance }) => {
     // First, load an admin page to ensure the discovery file is generated
     // The discovery file is generated on admin_init, so we need to visit an admin page first
@@ -108,4 +129,6 @@ test.describe('Discovery File', { tag: '@internal' }, () => {
     expect(data2.postTypes.length).toBe(data1.postTypes.length);
   });
 });
+
+
 
