@@ -2,6 +2,10 @@
 
 A minimal end-to-end testing tool for WordPress using WordPress Playground.
 
+Cross-Fit is intended to help answer the question "will changing (this thing) break my WordPress site?" - where "this thing" might be upgrading core, installing a new plugin, switching themes, etc.
+
+It's designed to catch things like PHP and JS errors, especially those that might appear only on one page of a site.
+
 ## Overview
 
 This MVP demonstrates feasibility of using WordPress Playground for E2E testing. It spins up a local WordPress instance, makes HTTP requests to it, and validates basic functionality.
@@ -68,9 +72,28 @@ npm test -- --import=./export.xml --theme=twentytwentyfour --plugin=akismet,jetp
 
 #### Running All Tests
 
-- `npm test` - Run all tests in headless mode
+- `npm test` - Run standard tests in headless mode
+- `npm run test:full` - Run expanded tests on every public and admin page
 - `npm run test:ui` - Run tests with Playwright UI mode (interactive)
 - `npm run test:headed` - Run tests with visible browser window
+
+#### Debugging Options
+
+**View WordPress Debug Log**
+
+After tests complete, you can view the WordPress debug log to see PHP errors, warnings, and notices that occurred during the test run:
+
+```bash
+# Show the last 50 lines of the debug log
+npm test -- --debug-log=50
+
+# Show the last 200 lines
+npm test -- --debug-log=200
+```
+
+The debug log is automatically captured from the WordPress instance and displayed at the end of the test run. Even without `--debug-log`, the teardown will report how many lines are in the debug log and the file path if any errors occurred.
+
+**Note**: The debug log only contains PHP errors, warnings, and notices. Network errors (like `ECONNRESET`) and test timeouts are not logged to the WordPress debug log.
 
 #### Running Test Subsets
 

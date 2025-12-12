@@ -1,4 +1,6 @@
 import { launchWordPress } from '../src/launcher.js';
+import { chromium } from '@playwright/test';
+// Removed unused imports from './test-helpers.js'
 
 /**
  * Global setup for Playwright tests
@@ -27,6 +29,54 @@ async function globalSetup() {
   global.wpInstance = wpInstance;
 
   console.log(`Global setup: WordPress ready at ${wpInstance.url}`);
+
+  // Initialize discovered data structure - will be populated lazily in tests
+  // Discovery happens in tests using page.request which works correctly
+  // (Node.js fetch has issues with redirects in Playground environment)
+  global.wpDiscoveredData = {
+    postTypes: null, // Will be discovered lazily in first test that needs it
+    listPageTypes: null, // Will be discovered lazily in first test that needs it
+    adminMenuItems: null, // Will be discovered lazily in first test that needs it
+  };
+
+  // Trigger discovery file creation by visiting an admin page
+  // This ensures the discovery file exists before parallel tests run
+  console.log('Global setup: Creating discovery file...');
+  try {
+    const browser = await chromium.launch({ headless: true });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+
+    // Navigate to admin dashboard - this triggers the discovery file creation
+    // Normalize URL to avoid double slashes
+    const baseUrl = wpInstance.url.replace(/\/$/, ''); // Remove trailing slash if present
+    const adminUrl = `${baseUrl}/wp-admin/`;
+    await page.goto(adminUrl, { waitUntil: 'commit', timeout: 30000 });
+
+    // Wait for the discovery file to be written
+    await page.waitForTimeout(2000);
+
+    // Verify the discovery file exists
+    const discoveryUrl = `${baseUrl}/wp-content/big-mistake-discovery.json`;
+    const discoveryResponse = await page.request.get(discoveryUrl);
+
+    if (discoveryResponse.status() === 200) {
+      const data = await discoveryResponse.json();
+      const menuCount = data?.adminMenuItems?.length || 0;
+      const submenuCount = data?.adminSubmenuItems?.length || 0;
+      console.log(`✓ Discovery file created successfully (${menuCount} menu items, ${submenuCount} submenu items)`);
+    } else {
+      console.warn(`Warning: Discovery file returned status ${discoveryResponse.status()}`);
+      console.warn('Discovery file will be created on first admin page access in tests');
+    }
+
+    await browser.close();
+  } catch (error) {
+    console.warn('Warning: Failed to create discovery file in global setup:', error.message);
+    console.warn('Discovery file will be created on first admin page access in tests');
+  }
+
+  console.log('Global setup: WordPress data will be discovered lazily in tests (using Playwright page.request)');
 
   // Return the instance for teardown
   return wpInstance;

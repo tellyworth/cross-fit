@@ -218,19 +218,52 @@ export async function launchWordPress() {
     const userBlueprint = await resolveBlueprintFromArg(blueprintArg);
 
     // Base blueprint: enable WordPress debug constants
+    // WP_DEBUG_LOG can be:
+    //   - true: uses default path wp-content/debug.log (relative to ABSPATH)
+    //   - string: absolute file path to log file
+    // Since we mount /wordpress to our temp dir, we use an explicit absolute path
+    // to ensure WordPress writes to our mounted location
+    const debugLogVfsPath = '/wordpress/wp-content/debug.log';
     const baseSteps = [
       {
         step: 'defineWpConfigConsts',
         consts: {
           WP_DEBUG: true,
           WP_DEBUG_DISPLAY: true,
-          WP_DEBUG_LOG: true,
+          WP_DEBUG_LOG: debugLogVfsPath, // Explicit absolute path in VFS that maps to our temp dir
           // Disable automatic updates to avoid external requests
           AUTOMATIC_UPDATER_DISABLED: true,
           WP_AUTO_UPDATE_CORE: false,
         },
       },
+      {
+        step: 'setSiteOptions',
+        options: {
+          // Disable compression test to prevent non-critical AJAX requests during tests
+          // This prevents wp-compression-test requests that often get aborted
+          can_compress_scripts: false,
+        },
+      },
+      {
+        step: 'runPHP',
+        code: `<?php
+// Write startup header to debug.log
+$log_path = '/wordpress/wp-content/debug.log';
+$log_dir = dirname($log_path);
+
+// Ensure directory exists
+if (!file_exists($log_dir)) {
+  mkdir($log_dir, 0755, true);
+}
+
+// Write startup header to debug log
+$timestamp = date('Y-m-d H:i:s');
+$header = "WordPress Playground started at {$timestamp}" . PHP_EOL;
+file_put_contents($log_path, $header, FILE_APPEND | LOCK_EX);
+`,
+      },
     ];
+
 
     // Build steps from CLI arguments (import, theme, plugins)
     const cliSteps = buildCliBlueprintSteps(ourTempDir);
@@ -302,60 +335,56 @@ export async function launchWordPress() {
 
   console.log(`✓ Server is ready at ${serverUrl}`);
 
-  // Install Big Mistake plugin as a must-use plugin
-  // mu-plugins are loaded automatically - files go directly in the directory (not subdirectories)
+  // Install Big Mistake plugin as a must-use plugin by copying it into wp-content/mu-plugins
+  // mu-plugins are loaded automatically on every request
   try {
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = dirname(__filename);
-    const pluginPath = join(__dirname, 'plugins', 'big-mistake.php');
-    const pluginContent = readFileSync(pluginPath, 'utf8');
-    const pluginBase64 = Buffer.from(pluginContent).toString('base64');
+    const pluginSourcePath = join(__dirname, 'plugins', 'big-mistake.php');
 
-    // Write plugin to mu-plugins directory
-    const result = await cliServer.playground.run({
-      code: `<?php
-        $mu_plugins_dir = '/wordpress/wp-content/mu-plugins';
-        if (!file_exists($mu_plugins_dir)) {
-          mkdir($mu_plugins_dir, 0755, true);
-        }
-        $plugin_file = $mu_plugins_dir . '/big-mistake.php';
-        $content = base64_decode('${pluginBase64}');
-        $bytes = file_put_contents($plugin_file, $content);
-        $success = $bytes !== false && file_exists($plugin_file);
-        return $success ? 'OK' : 'FAILED';
-      `,
-    });
-
-    // The result from playground.run() may be a PHP response object
-    // Check if it contains 'OK' or if the result itself is 'OK'
-    const resultText = typeof result === 'string' ? result :
-                       (result?.text || result?.body?.text || result?.toString() || '');
-
-    // Also check if result is an object with success property
-    if (resultText === 'OK' || (typeof result === 'object' && result?.success === true)) {
-      console.log('✓ Installed Big Mistake plugin as must-use plugin');
-    } else {
-      // Don't warn - plugin might still be installed even if result format is unexpected
-      // We'll verify it works when tests run
-      console.log('✓ Installed Big Mistake plugin as must-use plugin');
+    const muPluginsDir = join(ourTempDir, 'wp-content', 'mu-plugins');
+    if (!existsSync(muPluginsDir)) {
+      mkdirSync(muPluginsDir, { recursive: true });
     }
+
+    const pluginDestPath = join(muPluginsDir, 'big-mistake.php');
+    copyFileSync(pluginSourcePath, pluginDestPath);
+    console.log('✓ Installed Big Mistake plugin as must-use plugin');
   } catch (error) {
     console.warn('Warning: Failed to install Big Mistake plugin:', error.message);
   }
+
+  // Set up console.debug override: only output in debug mode
+  const isDebugMode = process.env.DEBUG === '1';
+  const originalDebug = console.debug;
+  console.debug = (...args) => {
+    if (isDebugMode) {
+      originalDebug(...args);
+    }
+    // In non-debug mode, console.debug is a no-op (silent)
+  };
 
   // Listen for errors from the HTTP server
   // The server property is a Node.js HTTP Server which extends EventEmitter
   // It emits 'error' events when server errors occur (port binding, etc.)
   // It emits 'clientError' events for client connection errors
-  // Note: We log all errors including ECONNRESET/EPIPE to see all Playground output
-  // ECONNRESET is common during tests but visible output helps with debugging
+  // ECONNRESET/EPIPE are expected when tests navigate away before assets finish loading
   if (cliServer.server && typeof cliServer.server.on === 'function') {
     cliServer.server.on('error', (error) => {
       console.error('[WordPress Playground Server Error]', error);
     });
 
     cliServer.server.on('clientError', (error, socket) => {
-      console.error('[WordPress Playground Client Error]', error);
+      // ECONNRESET and EPIPE are common during tests when pages navigate away
+      // before assets finish loading - these are expected and not real errors
+      // Use debug() for these, error() for all other client errors
+      const isExpectedError = error.code === 'ECONNRESET' || error.code === 'EPIPE';
+
+      if (isExpectedError) {
+        console.debug('[WordPress Playground Client Error]', error);
+      } else {
+        console.error('[WordPress Playground Client Error]', error);
+      }
     });
   }
 
@@ -364,11 +393,14 @@ export async function launchWordPress() {
   // by Playground and don't surface through the RemoteAPI interface
   // We rely on PHP error detection in rendered page content (WP_DEBUG_DISPLAY)
 
+  // Store the debug log path for teardown
+  const debugLogPath = `${ourTempDir}/wp-content/debug.log`;
+
   return {
     url: serverUrl,
     server: cliServer,
     // Since we mounted /wordpress to our temp dir, debug.log is directly in wp-content
-    debugLogPath: `${ourTempDir}/wp-content/debug.log`,
+    debugLogPath: debugLogPath,
     stop: async () => {
       try {
         // Try to stop the server - it may have a stop method or need cleanup via server property

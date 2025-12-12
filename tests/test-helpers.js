@@ -138,7 +138,7 @@ export async function readDebugLog(wpInstance, options = {}) {
 
     return null;
   } catch (e) {
-    console.error(`[readDebugLog] Error reading debug log at "${wpInstance?.debugLogPath}":`, e);
+    console.error(`[readDebugLog] Error reading debug log:`, e.message);
     return null;
   }
 }
@@ -192,21 +192,25 @@ export async function testWordPressPage(page, wpInstance, path, options = {}) {
   const consoleErrors = [];
   const pageErrors = [];
 
-  page.on('console', (msg) => {
+  // Store listener functions so we can remove them later
+  const consoleListener = (msg) => {
     if (msg.type() === 'error') {
       consoleErrors.push({
         text: msg.text(),
         location: msg.location(),
       });
     }
-  });
+  };
 
-  page.on('pageerror', (error) => {
+  const pageErrorListener = (error) => {
     pageErrors.push({
       message: error.message,
       stack: error.stack,
     });
-  });
+  };
+
+  page.on('console', consoleListener);
+  page.on('pageerror', pageErrorListener);
 
   // Navigate and check response
   // Use 'load' by default for faster tests (networkidle waits 500ms for no activity)
@@ -260,6 +264,10 @@ export async function testWordPressPage(page, wpInstance, path, options = {}) {
     expect(phpErrors).toHaveLength(0);
   }
 
+  // Remove event listeners to prevent memory leaks
+  page.off('console', consoleListener);
+  page.off('pageerror', pageErrorListener);
+
   // Return test results for additional assertions if needed
   return {
     response,
@@ -309,6 +317,722 @@ export async function testWordPressPages(page, wpInstance, pages, defaultOptions
   }
 
   return results;
+}
+
+/**
+ * Discover WordPress post types that have public single views (using fetch)
+ * Uses REST API to get all registered post types
+ * This version uses fetch directly and doesn't require a page object
+ *
+ * @param {string} baseUrl - WordPress base URL
+ * @returns {Promise<Array<Object>>} Array of post type objects with slug, name, and rest_base
+ */
+export async function discoverPostTypesFetch(baseUrl) {
+  // Parse the base URL to extract host
+  const urlObj = new URL(baseUrl);
+  const url = `${baseUrl.replace(/\/$/, '')}/wp-json/wp/v2/types`;
+
+  const fetchOptions = {
+    method: 'GET',
+    headers: {
+      'Accept': 'application/json',
+      'User-Agent': 'cross-fit-test-tool/1.0',
+      'Host': urlObj.host, // Set Host header explicitly
+    },
+    redirect: 'manual', // Handle redirects manually
+  };
+
+  let response;
+  try {
+    response = await fetch(url, fetchOptions);
+
+    // Handle redirect manually
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get('location');
+
+      if (location) {
+        // Resolve relative URLs
+        const redirectUrl = location.startsWith('http') ? location : new URL(location, baseUrl).toString();
+
+        // Try with trailing slash if redirect is to same path
+        let redirectUrlToTry = redirectUrl;
+        if (redirectUrl === url && !url.endsWith('/')) {
+          redirectUrlToTry = url + '/';
+        }
+
+        // Only follow one redirect to avoid loops
+        const redirectResponse = await fetch(redirectUrlToTry, { ...fetchOptions, redirect: 'manual' });
+
+        if (redirectResponse.status >= 300 && redirectResponse.status < 400) {
+          const redirectLocation = redirectResponse.headers.get('location');
+          throw new Error(`Redirect loop detected: ${url} -> ${redirectUrlToTry} -> ${redirectLocation}`);
+        }
+
+        response = redirectResponse;
+      }
+    }
+  } catch (error) {
+    throw error;
+  }
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch post types: HTTP ${response.status} ${response.statusText}`);
+  }
+
+  let data;
+  try {
+    data = await response.json();
+  } catch (error) {
+    throw new Error(`Failed to parse post types JSON: ${error.message}`);
+  }
+
+  const postTypes = [];
+
+  if (data && typeof data === 'object') {
+    for (const [slug, typeData] of Object.entries(data)) {
+      if (typeData.rest_base && typeData.publicly_queryable !== false) {
+        postTypes.push({
+          slug,
+          name: typeData.name || slug,
+          rest_base: typeData.rest_base,
+          has_archive: typeData.has_archive || false,
+        });
+      }
+    }
+  }
+
+  return postTypes;
+}
+
+/**
+ * Discover WordPress post types that have public single views
+ * Uses Big Mistake plugin's discovery endpoint
+ *
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @param {Object} wpInstance - WordPress instance with url property
+ * @returns {Promise<Array<Object>>} Array of post type objects with slug, name, and rest_base
+ */
+export async function discoverPostTypes(page, wpInstance) {
+  try {
+    const data = await loadDiscoveryDataFromFile(page, wpInstance);
+    const postTypes = Array.isArray(data.postTypes) ? data.postTypes : [];
+    return postTypes;
+  } catch (error) {
+    throw error;
+  }
+}
+
+/**
+ * Get one published item of each post type
+ * Used for standard test mode (one example per type)
+ *
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @param {Object} wpInstance - WordPress instance with url property
+ * @param {Array<Object>} postTypes - Array of post type objects from discoverPostTypes
+ * @returns {Promise<Array<Object>>} Array of objects with postType and item data
+ */
+export async function getOneItemPerPostType(page, wpInstance, postTypes) {
+  const items = [];
+
+  for (const postType of postTypes) {
+    // Use page.request directly to check status without assertion
+    const url = normalizePath(wpInstance.url, `/wp-json/wp/v2/${postType.rest_base}?per_page=1&status=publish`);
+    const response = await page.request.get(url, {
+      headers: {
+        'Accept': 'application/json',
+      },
+    });
+
+    const status = response.status();
+
+    // Fail if we get a non-200 response - this indicates discovery filtering didn't work correctly
+    if (status !== 200) {
+      const errorText = await response.text().catch(() => 'Could not read response body');
+      throw new Error(
+        `Post type ${postType.slug} returned HTTP ${status} when fetching items. ` +
+        `This post type should have been filtered during discovery as it is not publicly accessible. ` +
+        `Response: ${errorText.substring(0, 200)}`
+      );
+    }
+
+    // Process 200 response
+    const data = await response.json();
+    if (Array.isArray(data) && data.length > 0) {
+      const item = data[0];
+      items.push({
+        postType: postType.slug,
+        postTypeName: postType.name,
+        id: item.id,
+        slug: item.slug || null,
+        link: item.link || null,
+      });
+    }
+  }
+
+  return items;
+}
+
+/**
+ * Get all published items of each post type
+ * Used for full test mode (all items)
+ *
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @param {Object} wpInstance - WordPress instance with url property
+ * @param {Array<Object>} postTypes - Array of post type objects from discoverPostTypes
+ * @returns {Promise<Array<Object>>} Array of objects with postType and item data
+ */
+export async function getAllItemsPerPostType(page, wpInstance, postTypes) {
+  const items = [];
+
+  for (const postType of postTypes) {
+    // Use page.request directly to check status without assertion
+    const url = normalizePath(wpInstance.url, `/wp-json/wp/v2/${postType.rest_base}?per_page=100&status=publish`);
+    const response = await page.request.get(url, {
+      headers: {
+        'Accept': 'application/json',
+      },
+    });
+
+    const status = response.status();
+
+    // Fail if we get a non-200 response - this indicates discovery filtering didn't work correctly
+    if (status !== 200) {
+      const errorText = await response.text().catch(() => 'Could not read response body');
+      throw new Error(
+        `Post type ${postType.slug} returned HTTP ${status} when fetching items. ` +
+        `This post type should have been filtered during discovery as it is not publicly accessible. ` +
+        `Response: ${errorText.substring(0, 200)}`
+      );
+    }
+
+    // Process 200 response with pagination
+    let data = await response.json();
+    let pageNum = 1;
+    const perPage = 100;
+
+    // Get total pages from response header to avoid extra requests
+    const totalPages = parseInt(response.headers()['x-wp-totalpages'] || '1', 10);
+
+    // Process first page
+    if (Array.isArray(data) && data.length > 0) {
+      for (const item of data) {
+        items.push({
+          postType: postType.slug,
+          postTypeName: postType.name,
+          id: item.id,
+          slug: item.slug || null,
+          link: item.link || null,
+        });
+      }
+
+      // Continue fetching while there are more pages
+      while (pageNum < totalPages) {
+        pageNum++;
+        const nextUrl = normalizePath(wpInstance.url, `/wp-json/wp/v2/${postType.rest_base}?per_page=${perPage}&page=${pageNum}&status=publish`);
+        const nextResponse = await page.request.get(nextUrl, {
+          headers: {
+            'Accept': 'application/json',
+          },
+        });
+
+        const nextStatus = nextResponse.status();
+        if (nextStatus !== 200) {
+          const errorText = await nextResponse.text().catch(() => 'Could not read response body');
+          throw new Error(
+            `Post type ${postType.slug} returned HTTP ${nextStatus} when fetching page ${pageNum}. ` +
+            `This post type should have been filtered during discovery as it is not publicly accessible. ` +
+            `Response: ${errorText.substring(0, 200)}`
+          );
+        }
+
+        data = await nextResponse.json();
+        if (Array.isArray(data) && data.length > 0) {
+          for (const item of data) {
+            items.push({
+              postType: postType.slug,
+              postTypeName: postType.name,
+              id: item.id,
+              slug: item.slug || null,
+              link: item.link || null,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return items;
+}
+
+/**
+ * Discover WordPress list page types (archives, search, etc.) using fetch
+ * Returns one example of each type for standard mode
+ * This version uses fetch directly and doesn't require a page object
+ *
+ * @param {string} baseUrl - WordPress base URL
+ * @returns {Promise<Object>} Object with different list page types and examples
+ */
+export async function discoverListPageTypesFetch(baseUrl) {
+  const listPages = {
+    categories: [],
+    tags: [],
+    authors: [],
+    dateArchives: [],
+    customPostTypeArchives: [],
+    search: null,
+  };
+
+  const base = baseUrl.replace(/\/$/, '');
+
+  // Discover categories
+  try {
+    const url = `${base}/wp-json/wp/v2/categories?per_page=1&hide_empty=false`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'cross-fit-test-tool/1.0',
+      },
+      redirect: 'follow',
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    const data = await response.json();
+    if (Array.isArray(data) && data.length > 0) {
+      listPages.categories = data.map(cat => ({
+        id: cat.id,
+        slug: cat.slug,
+        link: cat.link || `/category/${cat.slug}/`,
+      }));
+    }
+  } catch (error) {
+    throw error;
+  }
+
+  // Discover tags
+  try {
+    const url = `${base}/wp-json/wp/v2/tags?per_page=1&hide_empty=false`;
+    const response = await fetch(url, { redirect: 'follow' });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    const data = await response.json();
+    if (Array.isArray(data) && data.length > 0) {
+      listPages.tags = data.map(tag => ({
+        id: tag.id,
+        slug: tag.slug,
+        link: tag.link || `/tag/${tag.slug}/`,
+      }));
+    }
+  } catch (error) {
+    throw error;
+  }
+
+  // Discover authors
+  try {
+    const url = `${base}/wp-json/wp/v2/users?per_page=1`;
+    const response = await fetch(url, { redirect: 'follow' });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    const data = await response.json();
+    if (Array.isArray(data) && data.length > 0) {
+      listPages.authors = data.map(author => ({
+        id: author.id,
+        slug: author.slug,
+        link: author.link || `/author/${author.slug}/`,
+      }));
+    }
+  } catch (error) {
+    throw error;
+  }
+
+  // Discover date archives
+  try {
+    const url = `${base}/wp-json/wp/v2/posts?per_page=1&status=publish`;
+    const response = await fetch(url, { redirect: 'follow' });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    const data = await response.json();
+    if (Array.isArray(data) && data.length > 0) {
+      const post = data[0];
+      if (post.date) {
+        const date = new Date(post.date);
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        listPages.dateArchives = [
+          { type: 'year', path: `/${year}/`, link: `/${year}/` },
+          { type: 'month', path: `/${year}/${month}/`, link: `/${year}/${month}/` },
+        ];
+      }
+    }
+  } catch (error) {
+    throw error;
+  }
+
+  // Discover custom post type archives
+  try {
+    const url = `${base}/wp-json/wp/v2/types`;
+    const response = await fetch(url, { redirect: 'follow' });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    const data = await response.json();
+    if (data && typeof data === 'object') {
+      for (const [slug, typeData] of Object.entries(data)) {
+        if (typeData.has_archive && typeData.rest_base) {
+          const archivePath = typeData.has_archive === true ? `/${slug}/` : `/${typeData.has_archive}/`;
+          listPages.customPostTypeArchives.push({
+            postType: slug,
+            path: archivePath,
+            link: archivePath,
+          });
+        }
+      }
+    }
+  } catch (error) {
+    throw error;
+  }
+
+  listPages.search = { path: '/?s=test', link: '/?s=test' };
+
+  return listPages;
+}
+
+/**
+ * Discover WordPress list page types (archives, search, etc.)
+ * Returns one example of each type for standard mode
+ *
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @param {Object} wpInstance - WordPress instance with url property
+ * @returns {Promise<Object>} Object with different list page types and examples
+ */
+export async function discoverListPageTypes(page, wpInstance) {
+  const data = await loadDiscoveryDataFromFile(page, wpInstance);
+  const rawListPages = data.listPages || {};
+
+  const listPages = {
+    categories: rawListPages.categories || [],
+    tags: rawListPages.tags || [],
+    authors: rawListPages.authors || [],
+    dateArchives: rawListPages.dateArchives || [],
+    customPostTypeArchives: rawListPages.customPostTypeArchives || [],
+    search: rawListPages.search || null,
+  };
+
+  // Convert URLs to paths for categories, tags, authors
+  if (listPages.categories) {
+    listPages.categories = listPages.categories.map(cat => ({
+      ...cat,
+      link: cat.url ? new URL(cat.url).pathname : `/category/${cat.slug}/`,
+    }));
+  }
+  if (listPages.tags) {
+    listPages.tags = listPages.tags.map(tag => ({
+      ...tag,
+      link: tag.url ? new URL(tag.url).pathname : `/tag/${tag.slug}/`,
+    }));
+  }
+  if (listPages.authors) {
+    listPages.authors = listPages.authors.map(author => ({
+      ...author,
+      link: author.url ? new URL(author.url).pathname : `/author/${author.slug}/`,
+    }));
+  }
+  if (listPages.dateArchives) {
+    listPages.dateArchives = listPages.dateArchives.map(archive => ({
+      ...archive,
+      path: archive.url ? new URL(archive.url).pathname : `/${archive.year}/${archive.month}/`,
+      link: archive.url ? new URL(archive.url).pathname : `/${archive.year}/${archive.month}/`,
+    }));
+  }
+  if (listPages.customPostTypeArchives) {
+    listPages.customPostTypeArchives = listPages.customPostTypeArchives.map(archive => ({
+      ...archive,
+      path: archive.url ? new URL(archive.url).pathname : `/${archive.slug}/`,
+      link: archive.url ? new URL(archive.url).pathname : `/${archive.slug}/`,
+    }));
+  }
+  if (listPages.search && listPages.search.url) {
+    const searchUrl = new URL(listPages.search.url);
+    const searchPath = searchUrl.pathname + (searchUrl.search || '');
+    listPages.search = {
+      path: searchPath,
+      link: searchPath,
+    };
+  } else if (!listPages.search) {
+    listPages.search = { path: '/?s=test', link: '/?s=test' };
+  }
+
+  return listPages;
+}
+
+/**
+ * Get all instances of each list page type
+ * Used for full test mode
+ *
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @param {Object} wpInstance - WordPress instance with url property
+ * @returns {Promise<Object>} Object with all list page instances
+ */
+export async function getAllListPageInstances(page, wpInstance) {
+  const listPages = {
+    categories: [],
+    tags: [],
+    authors: [],
+    dateArchives: [],
+    customPostTypeArchives: [],
+    search: [{ path: '/?s=test', link: '/?s=test' }], // Just one search example
+  };
+
+  // Get all categories
+  try {
+    let pageNum = 1;
+    let hasMore = true;
+    while (hasMore) {
+      const result = await testWordPressRESTAPI(page, wpInstance, `/wp-json/wp/v2/categories?per_page=100&page=${pageNum}&hide_empty=false`, {
+        expectedStatus: 200,
+      });
+      if (Array.isArray(result.data) && result.data.length > 0) {
+        for (const cat of result.data) {
+          listPages.categories.push({
+            id: cat.id,
+            slug: cat.slug,
+            link: cat.link || `/category/${cat.slug}/`,
+          });
+        }
+        const totalPages = parseInt(result.response.headers()['x-wp-totalpages'] || '1', 10);
+        hasMore = pageNum < totalPages;
+        pageNum++;
+      } else {
+        hasMore = false;
+      }
+    }
+  } catch (error) {
+    console.warn('Warning: Could not fetch all categories:', error.message);
+  }
+
+  // Get all tags
+  try {
+    let pageNum = 1;
+    let hasMore = true;
+    while (hasMore) {
+      const result = await testWordPressRESTAPI(page, wpInstance, `/wp-json/wp/v2/tags?per_page=100&page=${pageNum}&hide_empty=false`, {
+        expectedStatus: 200,
+      });
+      if (Array.isArray(result.data) && result.data.length > 0) {
+        for (const tag of result.data) {
+          listPages.tags.push({
+            id: tag.id,
+            slug: tag.slug,
+            link: tag.link || `/tag/${tag.slug}/`,
+          });
+        }
+        const totalPages = parseInt(result.response.headers()['x-wp-totalpages'] || '1', 10);
+        hasMore = pageNum < totalPages;
+        pageNum++;
+      } else {
+        hasMore = false;
+      }
+    }
+  } catch (error) {
+    console.warn('Warning: Could not fetch all tags:', error.message);
+  }
+
+  // Get all authors
+  try {
+    let pageNum = 1;
+    let hasMore = true;
+    while (hasMore) {
+      const result = await testWordPressRESTAPI(page, wpInstance, `/wp-json/wp/v2/users?per_page=100&page=${pageNum}`, {
+        expectedStatus: 200,
+      });
+      if (Array.isArray(result.data) && result.data.length > 0) {
+        for (const author of result.data) {
+          listPages.authors.push({
+            id: author.id,
+            slug: author.slug,
+            link: author.link || `/author/${author.slug}/`,
+          });
+        }
+        const totalPages = parseInt(result.response.headers()['x-wp-totalpages'] || '1', 10);
+        hasMore = pageNum < totalPages;
+        pageNum++;
+      } else {
+        hasMore = false;
+      }
+    }
+  } catch (error) {
+    console.warn('Warning: Could not fetch all authors:', error.message);
+  }
+
+  // Get all date archives - need to get all posts and extract unique dates
+  try {
+    const postsResult = await testWordPressRESTAPI(page, wpInstance, '/wp-json/wp/v2/posts?per_page=100&status=publish', {
+      expectedStatus: 200,
+    });
+    if (Array.isArray(postsResult.data) && postsResult.data.length > 0) {
+      const dateSet = new Set();
+      for (const post of postsResult.data) {
+        if (post.date) {
+          const date = new Date(post.date);
+          const year = date.getFullYear();
+          const month = String(date.getMonth() + 1).padStart(2, '0');
+          dateSet.add(`${year}/${month}`);
+          dateSet.add(year.toString());
+        }
+      }
+      for (const dateStr of dateSet) {
+        if (dateStr.includes('/')) {
+          listPages.dateArchives.push({ type: 'month', path: `/${dateStr}/`, link: `/${dateStr}/` });
+        } else {
+          listPages.dateArchives.push({ type: 'year', path: `/${dateStr}/`, link: `/${dateStr}/` });
+        }
+      }
+    }
+  } catch (error) {
+    console.warn('Warning: Could not discover all date archives:', error.message);
+  }
+
+  // Custom post type archives (same as standard mode, but we'll include all)
+  try {
+    const typesResult = await testWordPressRESTAPI(page, wpInstance, '/wp-json/wp/v2/types', {
+      expectedStatus: 200,
+    });
+    if (typesResult.data && typeof typesResult.data === 'object') {
+      for (const [slug, typeData] of Object.entries(typesResult.data)) {
+        if (typeData.has_archive && typeData.rest_base) {
+          const archivePath = typeData.has_archive === true ? `/${slug}/` : `/${typeData.has_archive}/`;
+          listPages.customPostTypeArchives.push({
+            postType: slug,
+            path: archivePath,
+            link: archivePath,
+          });
+        }
+      }
+    }
+  } catch (error) {
+    console.warn('Warning: Could not discover custom post type archives:', error.message);
+  }
+
+  return listPages;
+}
+
+/**
+ * Discover WordPress admin menu items (top-level only)
+ * Uses PHP execution to access $GLOBALS['menu']
+ *
+ * @param {Object} wpInstance - WordPress instance with server property
+ * @returns {Promise<Array<Object>>} Array of menu item objects with slug, title, and URL
+ */
+export async function discoverAdminMenuItems(wpInstance, page = null) {
+  // If page is not provided, we can't make the request
+  if (!page) {
+    throw new Error('Page object is required for admin menu discovery');
+  }
+
+  const data = await loadDiscoveryDataFromFile(page, wpInstance);
+  const adminMenuItems = Array.isArray(data.adminMenuItems) ? data.adminMenuItems : [];
+  return adminMenuItems;
+}
+
+/**
+ * Load discovery data from wp-content/big-mistake-discovery.json
+ * Uses Playwright's page.request to fetch the JSON file.
+ *
+ * Caching: Uses global.wpDiscoveryFileCache to cache the discovery file data
+ * across calls within a worker. This cache persists for the lifetime of the worker
+ * but is cleared when workers restart, which is acceptable since the discovery file
+ * is created during global setup and should be available for all tests.
+ *
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @param {Object} wpInstance - WordPress instance with url property
+ * @returns {Promise<Object>} Parsed discovery data object
+ */
+async function loadDiscoveryDataFromFile(page, wpInstance) {
+  // Use global cache to persist across calls within a worker
+  // Initialize if it doesn't exist
+  if (!global.wpDiscoveryFileCache) {
+    global.wpDiscoveryFileCache = null;
+  }
+
+  if (global.wpDiscoveryFileCache) {
+    return global.wpDiscoveryFileCache;
+  }
+
+  const url = normalizePath(wpInstance.url, '/wp-content/big-mistake-discovery.json');
+
+  const response = await page.request.get(url, {
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  const status = response.status();
+  if (status !== 200) {
+    const bodyText = await response.text().catch(() => '');
+    throw new Error(
+      `Failed to load discovery data from ${url}: HTTP ${status}. ` +
+      `Response: ${bodyText.substring(0, 200)}`
+    );
+  }
+
+  const data = await response.json().catch((err) => {
+    throw new Error(`Failed to parse discovery JSON from ${url}: ${err.message}`);
+  });
+
+  global.wpDiscoveryFileCache = data || {};
+  return global.wpDiscoveryFileCache;
+}
+
+/**
+ * Discover WordPress admin submenu items for a given parent menu
+ * Uses PHP execution to access $GLOBALS['submenu']
+ *
+ * @param {Object} wpInstance - WordPress instance with server property
+ * @param {string} parentSlug - Parent menu slug
+ * @returns {Promise<Array<Object>>} Array of submenu item objects with slug, title, and URL
+ */
+/**
+ * Discover all admin submenu items as a flat list
+ * Fetches discovery data once and returns all submenu items regardless of parent
+ *
+ * @param {Object} wpInstance - WordPress instance with url property
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @returns {Promise<Array<Object>>} Array of all submenu items
+ */
+export async function discoverAllAdminSubmenuItems(wpInstance, page) {
+  if (!page) {
+    throw new Error('Page object is required for admin submenu discovery');
+  }
+
+  const data = await loadDiscoveryDataFromFile(page, wpInstance);
+  const allSubmenus = Array.isArray(data.adminSubmenuItems) ? data.adminSubmenuItems : [];
+  return allSubmenus;
+}
+
+/**
+ * Discover admin submenu items for a specific parent menu item
+ * @deprecated Use discoverAllAdminSubmenuItems and filter client-side for better performance
+ *
+ * @param {Object} wpInstance - WordPress instance with url property
+ * @param {string} parentSlug - Parent menu slug to filter by
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @returns {Promise<Array<Object>>} Array of submenu items for the specified parent
+ */
+export async function discoverAdminSubmenuItems(wpInstance, parentSlug, page) {
+  if (!page) {
+    throw new Error('Page object is required for admin submenu discovery');
+  }
+
+  const data = await loadDiscoveryDataFromFile(page, wpInstance);
+  const allSubmenus = Array.isArray(data.adminSubmenuItems) ? data.adminSubmenuItems : [];
+
+  // Filter by parent slug
+  const submenuItems = allSubmenus.filter((item) => item.parent === parentSlug);
+  return submenuItems;
 }
 
 /**
@@ -384,12 +1108,40 @@ export async function testWordPressRSSFeed(page, wpInstance, path, options = {})
  */
 export async function testWordPressAdminPage(page, wpInstance, path, options = {}) {
   const url = normalizePath(wpInstance.url, path);
+  const {
+    allowConsoleErrors = false,
+    allowPageErrors = false,
+    allowPHPErrors = false,
+  } = options;
 
   // Check if page is already closed
   if (page.isClosed()) {
     throw new Error('Page was closed before navigation');
   }
 
+  // Track errors - set up listeners before navigation
+  const consoleErrors = [];
+  const pageErrors = [];
+
+  // Store listener functions so we can remove them later
+  const consoleListener = (msg) => {
+    if (msg.type() === 'error') {
+      consoleErrors.push({
+        text: msg.text(),
+        location: msg.location(),
+      });
+    }
+  };
+
+  const pageErrorListener = (error) => {
+    pageErrors.push({
+      message: error.message,
+      stack: error.stack,
+    });
+  };
+
+  page.on('console', consoleListener);
+  page.on('pageerror', pageErrorListener);
 
   // For admin pages, use 'commit' to start navigation quickly, then wait for elements
   // Admin pages have heavy JS that can delay DOMContentLoaded indefinitely
@@ -402,10 +1154,10 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
    * @param {number} [retryDelayMs=500] - Delay before retrying navigation (default: 500ms, empirically chosen for WP admin JS load)
    * @returns {Promise<Response>} - Playwright Response object
    */
-  async function navigateWithRetry(page, url, retryDelayMs = 500) {
+  async function navigateWithRetry(page, url, retryDelayMs = 500, navigationTimeout = 30000) {
     try {
       // Use 'commit' which waits for navigation to start (much faster)
-      return await page.goto(url, { waitUntil: 'commit', timeout: 30000 });
+      return await page.goto(url, { waitUntil: 'commit', timeout: navigationTimeout });
     } catch (e) {
       if (page.isClosed()) {
         throw new Error('Page was closed during navigation');
@@ -417,7 +1169,7 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
           throw new Error('Page was closed after navigation error');
         }
         try {
-          return await page.goto(url, { waitUntil: 'commit', timeout: 30000 });
+          return await page.goto(url, { waitUntil: 'commit', timeout: navigationTimeout });
         } catch (retryError) {
           if (page.isClosed()) {
             throw new Error('Page was closed during retry navigation');
@@ -447,6 +1199,37 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
   ]).catch(() => {
     // If none found, continue - we'll check below
   });
+
+  // Wait for JavaScript to execute and potentially hide "JavaScript required" notices
+  // WordPress shows these notices server-side but hides them with JavaScript
+  // Use a smart polling approach: check if hide-if-js elements are actually hidden
+  // This is faster than a fixed timeout and more reliable
+  try {
+    await page.waitForFunction(
+      () => {
+        // Check if WordPress admin JS is loaded (jQuery or wp object)
+        const jsLoaded = typeof jQuery !== 'undefined' || typeof wp !== 'undefined';
+        if (!jsLoaded) {
+          return false; // Keep waiting
+        }
+
+        // Check if any hide-if-js elements are still visible
+        const hideIfJsElements = Array.from(document.querySelectorAll('.hide-if-js'));
+        const visibleCount = hideIfJsElements.filter(el => {
+          const style = window.getComputedStyle(el);
+          return style.display !== 'none' && !el.classList.contains('hidden');
+        }).length;
+
+        // JS is loaded and all hide-if-js elements are hidden (or none exist)
+        return visibleCount === 0;
+      },
+      { timeout: 2000 } // Max 2 seconds, but usually much faster
+    ).catch(() => {
+      // If timeout, continue anyway - JS may not have hidden them yet but we filter them in detection
+    });
+  } catch (err) {
+    // Continue if wait fails - we'll filter notices in detection anyway
+  }
 
   // Detect PHP errors in page content (when WP_DEBUG_DISPLAY is enabled)
   let phpErrors = [];
@@ -483,7 +1266,6 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
   ).toBe(true);
 
   // Check for PHP errors (unless explicitly allowed)
-  const allowPHPErrors = options.allowPHPErrors || false;
   if (!allowPHPErrors && phpErrors.length > 0) {
     console.error('\n[PHP Errors Detected in Admin Page]');
     phpErrors.forEach((err, i) => {
@@ -495,11 +1277,183 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
     expect(phpErrors).toHaveLength(0);
   }
 
+  // Check for JavaScript console errors (unless explicitly allowed)
+  if (!allowConsoleErrors && consoleErrors.length > 0) {
+    console.error(`\n[JavaScript Console Errors Detected in Admin Page] (${path})`);
+    consoleErrors.forEach((err, i) => {
+      console.error(`  ${i + 1}. ${err.text}`);
+      if (err.location) {
+        console.error(`     Location: ${err.location.url}${err.location.lineNumber ? `:${err.location.lineNumber}` : ''}`);
+      }
+    });
+    expect(consoleErrors).toHaveLength(0);
+  }
+
+  // Check for JavaScript page errors (unless explicitly allowed)
+  if (!allowPageErrors && pageErrors.length > 0) {
+    console.error(`\n[JavaScript Page Errors Detected in Admin Page] (${path})`);
+    pageErrors.forEach((err, i) => {
+      console.error(`  ${i + 1}. ${err.message}`);
+      if (err.stack) {
+        console.error(`     Stack: ${err.stack.split('\n').slice(0, 3).join('\n     ')}`);
+      }
+    });
+    expect(pageErrors).toHaveLength(0);
+  }
+
+  // Check for WordPress dashboard notices
+  let dashboardNotices = [];
+  try {
+    if (!page.isClosed()) {
+      dashboardNotices = await page.evaluate(() => {
+        const notices = [];
+
+        // Find all WordPress admin notices
+        // WordPress uses .notice-error, .notice-warning, .notice-info, .notice-success
+        // They can be .notice.notice-error or just .notice-error
+        const noticeSelectors = [
+          '.notice-error',
+          '.notice-warning',
+          '.notice-info',
+          '.notice-success',
+          '.notice.notice-error',
+          '.notice.notice-warning',
+          '.notice.notice-info',
+          '.notice.notice-success',
+        ];
+
+        noticeSelectors.forEach(selector => {
+          const elements = document.querySelectorAll(selector);
+          elements.forEach(el => {
+            // Check if element is actually visible (not hidden by CSS)
+            // WordPress uses .hide-if-js class which is hidden by CSS when JS is enabled
+            const style = window.getComputedStyle(el);
+            const display = style.display;
+            const visibility = style.visibility;
+            const opacity = style.opacity;
+            const hasHiddenClass = el.classList.contains('hidden');
+
+            const isVisible = display !== 'none' &&
+                             visibility !== 'hidden' &&
+                             !hasHiddenClass &&
+                             opacity !== '0';
+
+            // Skip elements that are hidden by CSS (like .hide-if-js when JS is enabled)
+            if (!isVisible) {
+              return;
+            }
+
+            // Get the notice text, excluding dismiss buttons
+            const text = el.innerText.trim();
+            const dismissButton = el.querySelector('.notice-dismiss');
+            const noticeText = dismissButton ? text.replace(dismissButton.innerText, '').trim() : text;
+
+            if (noticeText) {
+              // Determine notice type from classes
+              let type = 'unknown';
+              if (el.classList.contains('notice-error')) {
+                type = 'error';
+              } else if (el.classList.contains('notice-warning')) {
+                type = 'warning';
+              } else if (el.classList.contains('notice-info')) {
+                type = 'info';
+              } else if (el.classList.contains('notice-success')) {
+                type = 'success';
+              }
+
+              notices.push({
+                type,
+                text: noticeText,
+              });
+            }
+          });
+        });
+
+        // Remove duplicates (same text and type)
+        const uniqueNotices = [];
+        const seen = new Set();
+        notices.forEach(notice => {
+          const key = `${notice.type}:${notice.text}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            uniqueNotices.push(notice);
+          }
+        });
+
+        return uniqueNotices;
+      });
+    }
+  } catch (err) {
+    console.warn('Error while detecting dashboard notices:', err);
+  }
+
+  // Page-specific notice whitelist - expected notices on specific pages
+  const noticeWhitelist = {
+    '/wp-admin/theme-editor.php': [
+      { type: 'warning', pattern: /minified version.*stylesheet/i },
+      { type: 'info', pattern: /edit and live preview CSS/i },
+      { type: 'info', pattern: /[(]style[.]css[)]/i },
+    ],
+    '/wp-admin/plugin-editor.php': [
+      { type: 'info', pattern: /\.php$/i }, // Plugin filename notices (e.g., "akismet.php")
+    ],
+    '/wp-admin/post-new.php': [
+      { type: 'error', pattern: /block editor requires JavaScript/i },
+    ],
+    '/wp-admin/post-new.php?post_type=page': [
+      { type: 'error', pattern: /block editor requires JavaScript/i },
+    ],
+  };
+
+  // Filter out whitelisted notices
+  const filteredNotices = dashboardNotices.filter(notice => {
+    const pageWhitelist = noticeWhitelist[path];
+    if (!pageWhitelist) {
+      return true; // No whitelist for this page, keep all notices
+    }
+
+    // Check if this notice matches any whitelist entry for this page
+    const isWhitelisted = pageWhitelist.some(entry => {
+      const typeMatches = entry.type === notice.type || entry.type === 'unknown';
+      const patternMatches = entry.pattern.test(notice.text || '');
+      return typeMatches && patternMatches;
+    });
+
+    return !isWhitelisted; // Keep notices that are NOT whitelisted
+  });
+
+  // Assert no error notices (after filtering)
+  const errorNotices = filteredNotices.filter(n => n.type === 'error');
+  if (errorNotices.length > 0) {
+    console.error(`\n[WordPress Dashboard Error Notices Detected] (${path})`);
+    errorNotices.forEach((notice, i) => {
+      console.error(`  ${i + 1}. ${notice.text}`);
+    });
+    expect(errorNotices).toHaveLength(0);
+  }
+
+  // Warn on warning/info/other notices (but don't fail the test)
+  const nonErrorNotices = filteredNotices.filter(n => n.type !== 'error');
+  if (nonErrorNotices.length > 0) {
+    console.warn(`\n[WordPress Dashboard Notices (non-error) Detected] (${path})`);
+    nonErrorNotices.forEach((notice, i) => {
+      const textDisplay = notice.text || '(no text)';
+      console.warn(`  ${i + 1}. [${notice.type.toUpperCase()}] ${textDisplay}`);
+    });
+  }
+
+  // Remove event listeners to prevent memory leaks
+  page.off('console', consoleListener);
+  page.off('pageerror', pageErrorListener);
+
   return {
     response,
     adminCheck,
     isAuthenticated: !isLoginPage,
     phpErrors,
+    consoleErrors,
+    pageErrors,
+    dashboardNotices,
   };
 }
 
@@ -525,6 +1479,7 @@ export async function testWordPressRESTAPI(page, wpInstance, path, options = {})
     expectedStatus = 200,
     validateResponse = null,
   } = options;
+
 
   // Make API request using Playwright's APIRequestContext
   // page.request is an APIRequestContext that provides get(), post(), etc.
@@ -558,7 +1513,27 @@ export async function testWordPressRESTAPI(page, wpInstance, path, options = {})
       response = await page.request.get(url, { headers: requestHeaders });
   }
 
-  expect(response.status()).toBe(expectedStatus);
+  const status = response.status();
+  if (status !== expectedStatus) {
+    // Get error details for debugging
+    const contentType = response.headers()['content-type'] || '';
+    let errorBody = '';
+    try {
+      if (contentType.includes('json')) {
+        const errorData = await response.json();
+        errorBody = JSON.stringify(errorData, null, 2);
+      } else {
+        errorBody = await response.text();
+      }
+    } catch (e) {
+      errorBody = `Could not read error response: ${e.message}`;
+    }
+
+    throw new Error(
+      `Expected HTTP ${expectedStatus} but got ${status} for ${path}\n` +
+      `Response body:\n${errorBody.substring(0, 1000)}`
+    );
+  }
 
   // Parse JSON response
   const contentType = response.headers()['content-type'] || '';

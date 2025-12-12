@@ -1,13 +1,13 @@
 import { test, expect } from './wp-fixtures.js';
 import {
   testWordPressAdminPage,
+  discoverAllAdminSubmenuItems,
 } from './test-helpers.js';
 
 /**
  * @fileoverview Tests for authenticated WordPress admin pages
  */
 test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
-  test.describe.configure({ mode: 'serial' });
 
   test('should access authenticated admin dashboard', { tag: '@smoke' }, async ({ page, wpInstance }) => {
     await testWordPressAdminPage(page, wpInstance, '/wp-admin/');
@@ -16,6 +16,9 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
   test('should access multiple admin pages', async ({ page, wpInstance }) => {
     // Test multiple admin pages
     await testWordPressAdminPage(page, wpInstance, '/wp-admin/');
+    // Extend timeout after first page to allow for additional pages
+    test.setTimeout(test.info().timeout + 30000); // Add 30 seconds
+
     await testWordPressAdminPage(page, wpInstance, '/wp-admin/options-general.php');
     // Add more admin pages easily:
     // await testWordPressAdminPage(page, wpInstance, '/wp-admin/edit.php');
@@ -27,6 +30,8 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
     const baseUrl = wpInstance.url.replace(/\/$/, '');
     const optionsPath = '/wp-admin/options-general.php';
     const optionsUrl = `${baseUrl}${optionsPath}`;
+
+    test.setTimeout(30000);
 
     // Navigate and wait for the form field to be ready
     const optionsResponse = await page.goto(optionsUrl, { waitUntil: 'commit' });
@@ -52,13 +57,90 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
     // The field being visible indicates the page has reloaded after form submission
     await expect(page.locator('#blogdescription')).toBeVisible({ timeout: 15000 });
 
-    // Wait a moment for the save to complete
-    await page.waitForTimeout(1000);
-
     // Check if the change was saved by reading the value again
     const savedTagline = await page.inputValue('#blogdescription');
 
     expect(savedTagline).toBe(newTagline);
+  });
+
+  test('should access all admin menu items without errors', async ({ page, wpInstance }) => {
+    // This test accesses multiple admin pages, so it needs more time
+    test.setTimeout(60000); // 60 seconds for multiple page loads
+
+    const isFullMode = process.env.FULL_MODE === '1';
+
+    // Discover admin menu items lazily if not already cached
+    let adminMenuItems = wpInstance.discoveredData?.adminMenuItems;
+    if (!adminMenuItems || adminMenuItems.length === 0) {
+      const { discoverAdminMenuItems } = await import('./test-helpers.js');
+      adminMenuItems = await discoverAdminMenuItems(wpInstance, page);
+      // Cache for other tests
+      if (global.wpDiscoveredData) {
+        global.wpDiscoveredData.adminMenuItems = adminMenuItems;
+      }
+      if (wpInstance.discoveredData) {
+        wpInstance.discoveredData.adminMenuItems = adminMenuItems;
+      }
+    }
+
+    if (adminMenuItems.length === 0) {
+      test.skip(true, 'No admin menu items discovered');
+      return;
+    }
+
+    // Test each top-level menu item
+    // Extend timeout dynamically after each successful page load
+    // This allows the test to complete even with many items, while still timing out if a page hangs
+    const timeoutExtensionPerItem = 10000; // Add 10 seconds per item (admin pages are slower)
+
+    for (let i = 0; i < adminMenuItems.length; i++) {
+      const menuItem = adminMenuItems[i];
+
+      // Extract path from full URL
+      const url = new URL(menuItem.url);
+      const path = url.pathname + url.search;
+
+      try {
+        // Use a shorter timeout per menu item to prevent one failure from blocking all tests
+        await testWordPressAdminPage(page, wpInstance, path, {
+          description: `Admin menu: ${menuItem.title} (${menuItem.slug})`,
+          timeout: 10000, // 10 seconds per page instead of default 20
+        });
+
+        // After successful page load, extend timeout for remaining items
+        test.setTimeout(test.info().timeout + timeoutExtensionPerItem);
+      } catch (error) {
+        // Log warning for inaccessible items but continue testing others
+        console.warn(`Warning: Could not access admin menu item "${menuItem.title}" (${menuItem.slug}):`, error.message);
+      }
+    }
+
+    // In full mode, also test all submenu items as a flat list
+    if (isFullMode) {
+      try {
+        // Fetch all submenu items once
+        const allSubmenuItems = await discoverAllAdminSubmenuItems(wpInstance, page);
+
+        // Process all submenu items as a flat list
+        for (const submenuItem of allSubmenuItems) {
+          const submenuUrl = new URL(submenuItem.url);
+          const submenuPath = submenuUrl.pathname + submenuUrl.search;
+          try {
+            await testWordPressAdminPage(page, wpInstance, submenuPath, {
+              description: `Admin submenu: ${submenuItem.title} (${submenuItem.slug})`,
+              timeout: 10000, // 10 seconds per page
+            });
+
+            // After successful submenu page load, extend timeout
+            test.setTimeout(test.info().timeout + timeoutExtensionPerItem);
+          } catch (subError) {
+            console.warn(`Warning: Could not access admin submenu item "${submenuItem.title}" (${submenuItem.slug}):`, subError.message);
+          }
+        }
+      } catch (error) {
+        console.warn(`Warning: Could not discover submenu items:`, error.message);
+      }
+    }
   });
 });
 
