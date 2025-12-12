@@ -396,10 +396,11 @@ function big_mistake_discover_list_pages() {
   // Discover date archives (from most recent post)
   $recent_post = get_posts(array('numberposts' => 1, 'post_status' => 'publish'));
   if (!empty($recent_post)) {
-    $post_date = get_post_time('Y-m-d', false, $recent_post[0]);
-    if ($post_date) {
-      $year = date('Y', strtotime($post_date));
-      $month = date('m', strtotime($post_date));
+    // Use get_post_time() directly with format strings to respect WordPress timezone settings
+    // Second parameter false = use site timezone (not GMT)
+    $year = get_post_time('Y', false, $recent_post[0]);
+    $month = get_post_time('m', false, $recent_post[0]);
+    if ($year && $month) {
       $list_pages['dateArchives'][] = array(
         'year' => $year,
         'month' => $month,
