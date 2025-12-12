@@ -192,21 +192,25 @@ export async function testWordPressPage(page, wpInstance, path, options = {}) {
   const consoleErrors = [];
   const pageErrors = [];
 
-  page.on('console', (msg) => {
+  // Store listener functions so we can remove them later
+  const consoleListener = (msg) => {
     if (msg.type() === 'error') {
       consoleErrors.push({
         text: msg.text(),
         location: msg.location(),
       });
     }
-  });
+  };
 
-  page.on('pageerror', (error) => {
+  const pageErrorListener = (error) => {
     pageErrors.push({
       message: error.message,
       stack: error.stack,
     });
-  });
+  };
+
+  page.on('console', consoleListener);
+  page.on('pageerror', pageErrorListener);
 
   // Navigate and check response
   // Use 'load' by default for faster tests (networkidle waits 500ms for no activity)
@@ -259,6 +263,10 @@ export async function testWordPressPage(page, wpInstance, path, options = {}) {
     });
     expect(phpErrors).toHaveLength(0);
   }
+
+  // Remove event listeners to prevent memory leaks
+  page.off('console', consoleListener);
+  page.off('pageerror', pageErrorListener);
 
   // Return test results for additional assertions if needed
   return {
@@ -502,6 +510,9 @@ export async function getAllItemsPerPostType(page, wpInstance, postTypes) {
     let pageNum = 1;
     const perPage = 100;
 
+    // Get total pages from response header to avoid extra requests
+    const totalPages = parseInt(response.headers()['x-wp-totalpages'] || '1', 10);
+
     // Process first page
     if (Array.isArray(data) && data.length > 0) {
       for (const item of data) {
@@ -514,8 +525,8 @@ export async function getAllItemsPerPostType(page, wpInstance, postTypes) {
         });
       }
 
-      // Continue fetching while we get full pages
-      while (data.length === perPage) {
+      // Continue fetching while there are more pages
+      while (pageNum < totalPages) {
         pageNum++;
         const nextUrl = normalizePath(wpInstance.url, `/wp-json/wp/v2/${postType.rest_base}?per_page=${perPage}&page=${pageNum}&status=publish`);
         const nextResponse = await page.request.get(nextUrl, {
@@ -545,8 +556,6 @@ export async function getAllItemsPerPostType(page, wpInstance, postTypes) {
               link: item.link || null,
             });
           }
-        } else {
-          break;
         }
       }
     }
@@ -929,20 +938,28 @@ export async function discoverAdminMenuItems(wpInstance, page = null) {
   return adminMenuItems;
 }
 
-// Cache discovery data across calls within a test run
-let cachedDiscoveryData = null;
-
 /**
  * Load discovery data from wp-content/big-mistake-discovery.json
  * Uses Playwright's page.request to fetch the JSON file.
+ *
+ * Caching: Uses global.wpDiscoveryFileCache to cache the discovery file data
+ * across calls within a worker. This cache persists for the lifetime of the worker
+ * but is cleared when workers restart, which is acceptable since the discovery file
+ * is created during global setup and should be available for all tests.
  *
  * @param {import('@playwright/test').Page} page - Playwright page object
  * @param {Object} wpInstance - WordPress instance with url property
  * @returns {Promise<Object>} Parsed discovery data object
  */
 async function loadDiscoveryDataFromFile(page, wpInstance) {
-  if (cachedDiscoveryData) {
-    return cachedDiscoveryData;
+  // Use global cache to persist across calls within a worker
+  // Initialize if it doesn't exist
+  if (!global.wpDiscoveryFileCache) {
+    global.wpDiscoveryFileCache = null;
+  }
+
+  if (global.wpDiscoveryFileCache) {
+    return global.wpDiscoveryFileCache;
   }
 
   const url = normalizePath(wpInstance.url, '/wp-content/big-mistake-discovery.json');
@@ -966,8 +983,8 @@ async function loadDiscoveryDataFromFile(page, wpInstance) {
     throw new Error(`Failed to parse discovery JSON from ${url}: ${err.message}`);
   });
 
-  cachedDiscoveryData = data || {};
-  return cachedDiscoveryData;
+  global.wpDiscoveryFileCache = data || {};
+  return global.wpDiscoveryFileCache;
 }
 
 /**
@@ -1106,21 +1123,25 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
   const consoleErrors = [];
   const pageErrors = [];
 
-  page.on('console', (msg) => {
+  // Store listener functions so we can remove them later
+  const consoleListener = (msg) => {
     if (msg.type() === 'error') {
       consoleErrors.push({
         text: msg.text(),
         location: msg.location(),
       });
     }
-  });
+  };
 
-  page.on('pageerror', (error) => {
+  const pageErrorListener = (error) => {
     pageErrors.push({
       message: error.message,
       stack: error.stack,
     });
-  });
+  };
+
+  page.on('console', consoleListener);
+  page.on('pageerror', pageErrorListener);
 
   // For admin pages, use 'commit' to start navigation quickly, then wait for elements
   // Admin pages have heavy JS that can delay DOMContentLoaded indefinitely
@@ -1420,6 +1441,10 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
       console.warn(`  ${i + 1}. [${notice.type.toUpperCase()}] ${textDisplay}`);
     });
   }
+
+  // Remove event listeners to prevent memory leaks
+  page.off('console', consoleListener);
+  page.off('pageerror', pageErrorListener);
 
   return {
     response,
