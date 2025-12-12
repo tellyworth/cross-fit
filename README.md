@@ -66,9 +66,19 @@ npm test -- --theme=twentytwentyfour
 npm test -- --plugin=akismet
 npm test -- --plugin=akismet,jetpack,woocommerce
 
+# Specify versions for plugins and themes (wordpress.org resources only)
+npm test -- --theme=mytheme@1.2
+npm test -- --plugin=akismet@3.4.5,jetpack@4,woocommerce
+
+# Specify WordPress version
+npm test -- --wpversion=6.5
+
 # Combine all options
 npm test -- --import=./export.xml --theme=twentytwentyfour --plugin=akismet,jetpack
+npm test -- --wpversion=6.5 --theme=mytheme@1.2 --plugin=akismet@3.4.5,jetpack@4,woocommerce
 ```
+
+**Note**: Version numbers (using `@version` notation) only apply to plugins and themes downloaded from wordpress.org. They are ignored for local file paths and URLs.
 
 #### Running All Tests
 

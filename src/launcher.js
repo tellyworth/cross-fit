@@ -118,7 +118,7 @@ function buildCliBlueprintSteps(tempDir) {
 /**
  * Resolve a theme or plugin resource from a slug, URL, or local file path
  * For local files, copies them to the temp directory which is mounted to /wordpress in VFS
- * @param {string} arg - The slug, URL, or file path
+ * @param {string} arg - The slug, URL, or file path (may include @version for wordpress.org resources)
  * @param {string} type - Either 'theme' or 'plugin' to determine wordpress.org resource type
  * @param {string} tempDir - Path to the temp directory mounted to /wordpress in VFS
  * @returns {Object|null} Resource object for use in installTheme/installPlugin steps, or null if invalid
@@ -173,12 +173,30 @@ function resolveThemeOrPluginResource(arg, type, tempDir) {
     }
   }
 
-  // Treat as wordpress.org slug
-  const resourceType = type === 'theme' ? 'wordpress.org/themes' : 'wordpress.org/plugins';
-  return {
-    resource: resourceType,
-    slug: arg,
-  };
+  // Treat as wordpress.org slug - parse version if present
+  // Only parse version for wordpress.org resources (not URLs or local paths)
+  // Workaround: When version is specified, use URLReference with direct download URL
+  // instead of CorePluginReference/CoreThemeReference (version field not working)
+  const versionMatch = arg.match(/^(.+?)@(.+)$/);
+
+  if (versionMatch) {
+    // Version specified: construct direct download URL
+    const slug = versionMatch[1];
+    const version = versionMatch[2];
+    const downloadPath = type === 'theme' ? 'theme' : 'plugin';
+    const downloadUrl = `https://downloads.wordpress.org/${downloadPath}/${slug}.${version}.zip`;
+    return {
+      resource: 'url',
+      url: downloadUrl,
+    };
+  } else {
+    // No version specified: use wordpress.org resource (CorePluginReference/CoreThemeReference)
+    const resourceType = type === 'theme' ? 'wordpress.org/themes' : 'wordpress.org/plugins';
+    return {
+      resource: resourceType,
+      slug: arg,
+    };
+  }
 }
 
 /**
@@ -276,12 +294,15 @@ file_put_contents($log_path, $header, FILE_APPEND | LOCK_EX);
 
     const finalBlueprint = { steps: allSteps };
 
+    // Get WordPress version from environment variable, default to 'latest'
+    const wpVersion = process.env.WP_WP_VERSION || 'latest';
+
     // Mount our temp directory to /wordpress before installation
     // This ensures WordPress files (including debug.log) are stored in our known directory
     cliServer = await runCLI({
       command: 'server',
       php: '8.3',
-      wp: 'latest',
+      wp: wpVersion,
       login: true,
       debug: true,
       verbosity: 'debug',
@@ -295,6 +316,11 @@ file_put_contents($log_path, $header, FILE_APPEND | LOCK_EX);
     });
 
     console.log('✓ Enabled WP_DEBUG, WP_DEBUG_DISPLAY, and WP_DEBUG_LOG via blueprint');
+
+    // Log WordPress version
+    if (process.env.WP_WP_VERSION) {
+      console.log(`✓ Will use WordPress version: ${process.env.WP_WP_VERSION}`);
+    }
 
     // Log CLI argument actions
     if (process.env.WP_IMPORT) {
