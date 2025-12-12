@@ -701,67 +701,63 @@ export async function discoverListPageTypesFetch(baseUrl) {
  * @returns {Promise<Object>} Object with different list page types and examples
  */
 export async function discoverListPageTypes(page, wpInstance) {
-  try {
-    const data = await loadDiscoveryDataFromFile(page, wpInstance);
-    const rawListPages = data.listPages || {};
+  const data = await loadDiscoveryDataFromFile(page, wpInstance);
+  const rawListPages = data.listPages || {};
 
-    const listPages = {
-      categories: rawListPages.categories || [],
-      tags: rawListPages.tags || [],
-      authors: rawListPages.authors || [],
-      dateArchives: rawListPages.dateArchives || [],
-      customPostTypeArchives: rawListPages.customPostTypeArchives || [],
-      search: rawListPages.search || null,
-    };
+  const listPages = {
+    categories: rawListPages.categories || [],
+    tags: rawListPages.tags || [],
+    authors: rawListPages.authors || [],
+    dateArchives: rawListPages.dateArchives || [],
+    customPostTypeArchives: rawListPages.customPostTypeArchives || [],
+    search: rawListPages.search || null,
+  };
 
-    // Convert URLs to paths for categories, tags, authors
-    if (listPages.categories) {
-      listPages.categories = listPages.categories.map(cat => ({
-        ...cat,
-        link: cat.url ? new URL(cat.url).pathname : `/category/${cat.slug}/`,
-      }));
-    }
-    if (listPages.tags) {
-      listPages.tags = listPages.tags.map(tag => ({
-        ...tag,
-        link: tag.url ? new URL(tag.url).pathname : `/tag/${tag.slug}/`,
-      }));
-    }
-    if (listPages.authors) {
-      listPages.authors = listPages.authors.map(author => ({
-        ...author,
-        link: author.url ? new URL(author.url).pathname : `/author/${author.slug}/`,
-      }));
-    }
-    if (listPages.dateArchives) {
-      listPages.dateArchives = listPages.dateArchives.map(archive => ({
-        ...archive,
-        path: archive.url ? new URL(archive.url).pathname : `/${archive.year}/${archive.month}/`,
-        link: archive.url ? new URL(archive.url).pathname : `/${archive.year}/${archive.month}/`,
-      }));
-    }
-    if (listPages.customPostTypeArchives) {
-      listPages.customPostTypeArchives = listPages.customPostTypeArchives.map(archive => ({
-        ...archive,
-        path: archive.url ? new URL(archive.url).pathname : `/${archive.slug}/`,
-        link: archive.url ? new URL(archive.url).pathname : `/${archive.slug}/`,
-      }));
-    }
-    if (listPages.search && listPages.search.url) {
-      const searchUrl = new URL(listPages.search.url);
-      const searchPath = searchUrl.pathname + (searchUrl.search || '');
-      listPages.search = {
-        path: searchPath,
-        link: searchPath,
-      };
-    } else if (!listPages.search) {
-      listPages.search = { path: '/?s=test', link: '/?s=test' };
-    }
-
-    return listPages;
-  } catch (error) {
-    throw error;
+  // Convert URLs to paths for categories, tags, authors
+  if (listPages.categories) {
+    listPages.categories = listPages.categories.map(cat => ({
+      ...cat,
+      link: cat.url ? new URL(cat.url).pathname : `/category/${cat.slug}/`,
+    }));
   }
+  if (listPages.tags) {
+    listPages.tags = listPages.tags.map(tag => ({
+      ...tag,
+      link: tag.url ? new URL(tag.url).pathname : `/tag/${tag.slug}/`,
+    }));
+  }
+  if (listPages.authors) {
+    listPages.authors = listPages.authors.map(author => ({
+      ...author,
+      link: author.url ? new URL(author.url).pathname : `/author/${author.slug}/`,
+    }));
+  }
+  if (listPages.dateArchives) {
+    listPages.dateArchives = listPages.dateArchives.map(archive => ({
+      ...archive,
+      path: archive.url ? new URL(archive.url).pathname : `/${archive.year}/${archive.month}/`,
+      link: archive.url ? new URL(archive.url).pathname : `/${archive.year}/${archive.month}/`,
+    }));
+  }
+  if (listPages.customPostTypeArchives) {
+    listPages.customPostTypeArchives = listPages.customPostTypeArchives.map(archive => ({
+      ...archive,
+      path: archive.url ? new URL(archive.url).pathname : `/${archive.slug}/`,
+      link: archive.url ? new URL(archive.url).pathname : `/${archive.slug}/`,
+    }));
+  }
+  if (listPages.search && listPages.search.url) {
+    const searchUrl = new URL(listPages.search.url);
+    const searchPath = searchUrl.pathname + (searchUrl.search || '');
+    listPages.search = {
+      path: searchPath,
+      link: searchPath,
+    };
+  } else if (!listPages.search) {
+    listPages.search = { path: '/?s=test', link: '/?s=test' };
+  }
+
+  return listPages;
 }
 
 /**
@@ -928,13 +924,9 @@ export async function discoverAdminMenuItems(wpInstance, page = null) {
     throw new Error('Page object is required for admin menu discovery');
   }
 
-  try {
-    const data = await loadDiscoveryDataFromFile(page, wpInstance);
-    const adminMenuItems = Array.isArray(data.adminMenuItems) ? data.adminMenuItems : [];
-    return adminMenuItems;
-  } catch (error) {
-    throw error;
-  }
+  const data = await loadDiscoveryDataFromFile(page, wpInstance);
+  const adminMenuItems = Array.isArray(data.adminMenuItems) ? data.adminMenuItems : [];
+  return adminMenuItems;
 }
 
 // Cache discovery data across calls within a test run

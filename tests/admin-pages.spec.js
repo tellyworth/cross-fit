@@ -113,7 +113,6 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
         // Log warning for inaccessible items but continue testing others
         console.warn(`Warning: Could not access admin menu item "${menuItem.title}" (${menuItem.slug}):`, error.message);
       }
-
     }
 
     // In full mode, also test all submenu items as a flat list

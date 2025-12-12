@@ -1,10 +1,6 @@
 import { launchWordPress } from '../src/launcher.js';
 import { chromium } from '@playwright/test';
-import {
-  discoverPostTypesFetch,
-  discoverListPageTypesFetch,
-  discoverAdminMenuItems,
-} from './test-helpers.js';
+// Removed unused imports from './test-helpers.js'
 
 /**
  * Global setup for Playwright tests

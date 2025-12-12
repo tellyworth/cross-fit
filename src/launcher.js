@@ -1,5 +1,5 @@
 import { runCLI } from '@wp-playground/cli';
-import { readFileSync, mkdtempSync, existsSync, copyFileSync, mkdirSync, readdirSync } from 'fs';
+import { readFileSync, mkdtempSync, existsSync, copyFileSync, mkdirSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join, resolve, basename } from 'path';
 import { tmpdir } from 'os';
