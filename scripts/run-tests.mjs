@@ -58,6 +58,11 @@ async function main() {
     // Do not forward --plugin to Playwright
   }
 
+  if (options.wpversion || options['wp-version']) {
+    env.WP_WP_VERSION = options.wpversion || options['wp-version'];
+    // Do not forward --wpversion to Playwright
+  }
+
   // Handle FULL_MODE flag
   if (options.full || options.fullMode || process.env.FULL_MODE === '1') {
     env.FULL_MODE = '1';
@@ -76,6 +81,7 @@ async function main() {
       // Skip custom options that we handle ourselves
       if (key !== 'blueprint' && key !== 'debugLog' && key !== 'debug-log' &&
           key !== 'import' && key !== 'theme' && key !== 'plugin' &&
+          key !== 'wpversion' && key !== 'wp-version' &&
           key !== 'full' && key !== 'fullMode' && key !== 'debug') {
         forwardedArgs.push(`--${key}=${value}`);
       }
