@@ -76,5 +76,29 @@ test.describe('PHP Error Detection', { tag: '@internal' }, () => {
     expect(Array.isArray(result.phpErrors)).toBe(true);
     expect(result.phpErrors.length).toBeGreaterThan(0);
   });
+
+  test('should detect PHP fatal error via non_existent_function() and return 500', async ({ page, wpInstance }) => {
+    // Use Big Mistake plugin to trigger a PHP fatal error via GET parameter
+    const baseUrl = wpInstance.url.replace(/\/$/, '');
+    const response = await page.goto(`${baseUrl}/?trigger_php_error=fatal`, { waitUntil: 'load' });
+
+    // Fatal errors should result in a 500 status code
+    expect(response.status()).toBe(500);
+
+    // Check that the error message appears in the page content
+    const pageContent = await page.content();
+    const phpErrors = detectPHPErrors(pageContent);
+
+    // Verify we detected a PHP fatal error
+    expect(phpErrors.length).toBeGreaterThan(0);
+    expect(phpErrors.some(err =>
+      err.type === 'fatal' ||
+      err.message.includes('non_existent_function') ||
+      err.message.includes('Call to undefined function')
+    )).toBe(true);
+
+    // Also verify the error message appears in the raw content
+    expect(pageContent).toContain('non_existent_function');
+  });
 });
 

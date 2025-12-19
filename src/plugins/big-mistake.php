@@ -41,10 +41,8 @@ function big_mistake_trigger_errors() {
         break;
 
       case 'fatal':
-        // Trigger fatal error (but wrap in try/catch to avoid breaking page completely)
-        // Actually, we can't really trigger a fatal error without breaking the page
-        // So we'll use a parse error or undefined function call
-        trigger_error('Big Mistake: Fatal error simulation', E_USER_ERROR);
+        // Trigger a real fatal error. Breaking the page is intended.
+        non_existent_function();
         break;
 
       case 'deprecated':
