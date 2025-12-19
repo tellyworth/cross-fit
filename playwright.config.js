@@ -14,6 +14,8 @@ const LOCAL_WORKERS = process.env.PW_WORKERS
 
 export default defineConfig({
   testDir: './tests',
+  // Store all screenshots in a central test-snapshots directory
+  snapshotPathTemplate: 'test-snapshots/{arg}{ext}',
   fullyParallel: true, // Run tests in parallel with multiple workers
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
