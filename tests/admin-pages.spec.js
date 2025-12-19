@@ -64,9 +64,8 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
   });
 
   test('should access all admin menu items without errors', async ({ page, wpInstance }) => {
-    // This test accesses multiple admin pages, so it needs more time
-    test.setTimeout(60000); // 60 seconds for multiple page loads
-
+    // This test accesses multiple admin pages in parallel
+    // Set timeout based on number of items: base timeout + 15 seconds per item (parallel execution is faster)
     const isFullMode = process.env.FULL_MODE === '1';
 
     // Discover admin menu items lazily if not already cached
@@ -88,53 +87,230 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
       return;
     }
 
-    // Test each top-level menu item
-    // Extend timeout dynamically after each successful page load
-    // This allows the test to complete even with many items, while still timing out if a page hangs
-    const timeoutExtensionPerItem = 10000; // Add 10 seconds per item (admin pages are slower)
+    // Calculate timeout for batched parallel execution:
+    // With batched parallel execution, we need time for: base + (number of batches * time per batch)
+    // Each batch processes items in parallel, taking ~20 seconds per batch
+    const baseTimeout = 30000; // Base 30 seconds
+    const timeoutPerItem = 20000; // 20 seconds per page (admin pages can be slow)
+    // Match the worker count to avoid overwhelming the system
+    // Playwright workers run tests in parallel, so we limit browser contexts per test accordingly
+    const concurrencyLimit = 4; // Process 4 items in parallel at a time (matches worker count)
+    const batches = Math.ceil(adminMenuItems.length / concurrencyLimit);
+    const timePerBatch = timeoutPerItem + 5000; // 20s per page + 5s overhead per batch
+    // Timeout = base + (batches * time per batch)
+    const estimatedTimeout = baseTimeout + (batches * timePerBatch);
+    test.setTimeout(estimatedTimeout);
 
-    for (let i = 0; i < adminMenuItems.length; i++) {
-      const menuItem = adminMenuItems[i];
-
-      // Extract path from full URL
-      const url = new URL(menuItem.url);
-      const path = url.pathname + url.search;
-
-      try {
-        // Use a shorter timeout per menu item to prevent one failure from blocking all tests
-        await testWordPressAdminPage(page, wpInstance, path, {
-          description: `Admin menu: ${menuItem.title} (${menuItem.slug})`,
-          timeout: 10000, // 10 seconds per page instead of default 20
-        });
-
-        // After successful page load, extend timeout for remaining items
-        test.setTimeout(test.info().timeout + timeoutExtensionPerItem);
-      } catch (error) {
-        // Log warning for inaccessible items but continue testing others
-        console.warn(`Warning: Could not access admin menu item "${menuItem.title}" (${menuItem.slug}):`, error.message);
-      }
+    // Get browser from page context to create new contexts for parallel execution
+    // Each context will have its own session/cookies, ensuring isolation
+    const browserContext = page.context();
+    const browser = browserContext.browser();
+    if (!browser) {
+      throw new Error('Could not access browser from page context');
     }
 
-    // In full mode, also test all submenu items as a flat list
+    // Get storage state once for reuse across all contexts
+    const storageState = await browserContext.storageState();
+
+    // Prepare menu items for parallel testing
+    const menuItemTests = adminMenuItems.map((menuItem) => {
+      const url = new URL(menuItem.url);
+      const path = url.pathname + url.search;
+      return {
+        path,
+        title: menuItem.title,
+        slug: menuItem.slug,
+        description: `Admin menu: ${menuItem.title} (${menuItem.slug})`,
+      };
+    });
+
+    // Create a pool of reusable browser contexts to avoid the overhead of creating/closing contexts
+    // This is much faster than creating a new context for each test
+    const contextPool = [];
+    const poolSize = concurrencyLimit; // Match worker count
+
+    // Initialize context pool
+    for (let i = 0; i < poolSize; i++) {
+      const context = await browser.newContext({
+        storageState: storageState,
+      });
+      contextPool.push(context);
+    }
+
+    // Helper to get a context from the pool (round-robin)
+    let contextIndex = 0;
+    function getContext() {
+      const context = contextPool[contextIndex % poolSize];
+      contextIndex++;
+      return context;
+    }
+
+    // Process items with true concurrency limiting (not batching)
+    // This starts new tasks as soon as a slot becomes available, rather than waiting for entire batches
+    async function processWithConcurrencyLimit(items, concurrency, processor) {
+      const results = [];
+      const executing = new Set();
+      let index = 0;
+
+      while (index < items.length || executing.size > 0) {
+        // Start new tasks up to the concurrency limit
+        while (executing.size < concurrency && index < items.length) {
+          const item = items[index++];
+          const promise = Promise.resolve(processor(item))
+            .then(
+              (value) => ({ status: 'fulfilled', value }),
+              (reason) => ({ status: 'rejected', reason })
+            )
+            .finally(() => {
+              executing.delete(promise);
+            });
+          executing.add(promise);
+        }
+
+        // Wait for at least one task to complete
+        if (executing.size > 0) {
+          const result = await Promise.race(Array.from(executing));
+          results.push(result);
+        }
+      }
+
+      return results;
+    }
+
+    // Process menu items with concurrency limiting using the context pool
+    const startTime = Date.now();
+
+    const menuResults = await processWithConcurrencyLimit(
+      menuItemTests,
+      concurrencyLimit,
+      async (menuItem) => {
+        const itemStartTime = Date.now();
+        const context = getContext();
+        const testPage = await context.newPage();
+
+        try {
+          await testWordPressAdminPage(testPage, wpInstance, menuItem.path, {
+            description: menuItem.description,
+            timeout: 20000, // 20 seconds per page
+          });
+          return { success: true, menuItem };
+        } catch (error) {
+          return { success: false, menuItem, error: error.message };
+        } finally {
+          await testPage.close();
+        }
+      }
+    );
+
+    // Clean up context pool (but keep contexts open for submenu items if in full mode)
+    if (!isFullMode) {
+      await Promise.all(contextPool.map(ctx => ctx.close()));
+    }
+
+    // Process results and report failures
+    const failures = [];
+    menuResults.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        const menuItem = menuItemTests[index];
+        failures.push({
+          menuItem: menuItem.title,
+          slug: menuItem.slug,
+          error: result.reason?.message || String(result.reason),
+        });
+      } else if (result.value && !result.value.success) {
+        failures.push({
+          menuItem: result.value.menuItem.title,
+          slug: result.value.menuItem.slug,
+          error: result.value.error,
+        });
+      }
+    });
+
+    // Log warnings for failures but don't fail the test (similar to original behavior)
+    if (failures.length > 0) {
+      console.warn(`\n[Admin Menu Items] ${failures.length} of ${adminMenuItems.length} items had issues:`);
+      failures.forEach((failure) => {
+        console.warn(`  - "${failure.menuItem}" (${failure.slug}): ${failure.error}`);
+      });
+    }
+
+    // In full mode, also test all submenu items in parallel
     if (isFullMode) {
       try {
-        // Fetch all submenu items once
+        // Fetch all submenu items once (using original page)
         const allSubmenuItems = await discoverAllAdminSubmenuItems(wpInstance, page);
 
-        // Process all submenu items as a flat list
-        for (const submenuItem of allSubmenuItems) {
-          const submenuUrl = new URL(submenuItem.url);
-          const submenuPath = submenuUrl.pathname + submenuUrl.search;
-          try {
-            await testWordPressAdminPage(page, wpInstance, submenuPath, {
-              description: `Admin submenu: ${submenuItem.title} (${submenuItem.slug})`,
-              timeout: 10000, // 10 seconds per page
-            });
+          if (allSubmenuItems.length > 0) {
+          // For submenu items, we run them after menu items, so we need additional time
+          // Calculate batches for submenu items
+          const submenuBatches = Math.ceil(allSubmenuItems.length / concurrencyLimit);
+          const submenuTimeout = test.info().timeout + (submenuBatches * timePerBatch);
+          test.setTimeout(submenuTimeout);
 
-            // After successful submenu page load, extend timeout
-            test.setTimeout(test.info().timeout + timeoutExtensionPerItem);
-          } catch (subError) {
-            console.warn(`Warning: Could not access admin submenu item "${submenuItem.title}" (${submenuItem.slug}):`, subError.message);
+          // Prepare submenu items for parallel testing
+          const submenuItemTests = allSubmenuItems.map((submenuItem) => {
+            const submenuUrl = new URL(submenuItem.url);
+            const submenuPath = submenuUrl.pathname + submenuUrl.search;
+            return {
+              path: submenuPath,
+              title: submenuItem.title,
+              slug: submenuItem.slug,
+              description: `Admin submenu: ${submenuItem.title} (${submenuItem.slug})`,
+            };
+          });
+
+          // Test all submenu items with concurrency limiting using the same context pool
+          const submenuStartTime = Date.now();
+
+          const submenuResults = await processWithConcurrencyLimit(
+            submenuItemTests,
+            concurrencyLimit,
+            async (submenuItem) => {
+              const itemStartTime = Date.now();
+              const context = getContext();
+              const testPage = await context.newPage();
+
+              try {
+                await testWordPressAdminPage(testPage, wpInstance, submenuItem.path, {
+                  description: submenuItem.description,
+                  timeout: 20000,
+                });
+                return { success: true, submenuItem };
+              } catch (error) {
+                return { success: false, submenuItem, error: error.message };
+              } finally {
+                await testPage.close();
+              }
+            }
+          );
+
+          // Clean up context pool after submenu items
+          await Promise.all(contextPool.map(ctx => ctx.close()));
+
+          // Process submenu results
+          const submenuFailures = [];
+          submenuResults.forEach((result, index) => {
+            if (result.status === 'rejected') {
+              const submenuItem = submenuItemTests[index];
+              submenuFailures.push({
+                submenuItem: submenuItem.title,
+                slug: submenuItem.slug,
+                error: result.reason?.message || String(result.reason),
+              });
+            } else if (result.value && !result.value.success) {
+              submenuFailures.push({
+                submenuItem: result.value.submenuItem.title,
+                slug: result.value.submenuItem.slug,
+                error: result.value.error,
+              });
+            }
+          });
+
+          if (submenuFailures.length > 0) {
+            console.warn(`\n[Admin Submenu Items] ${submenuFailures.length} of ${allSubmenuItems.length} items had issues:`);
+            submenuFailures.forEach((failure) => {
+              console.warn(`  - "${failure.submenuItem}" (${failure.slug}): ${failure.error}`);
+            });
           }
         }
       } catch (error) {
