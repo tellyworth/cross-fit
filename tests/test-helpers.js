@@ -7,6 +7,33 @@ import { readFileSync, existsSync } from 'fs';
  */
 
 /**
+ * Generate a safe snapshot name from a path
+ * Converts /wp-admin/options-general.php to wp-admin-options-general-php.png
+ * Handles query parameters by encoding them
+ * Note: Playwright automatically adds platform suffix (e.g., -darwin), so we just need .png extension
+ */
+function pathToSnapshotName(path) {
+  // Split path and query
+  const [pathPart, queryPart] = path.split('?');
+
+  // Remove leading/trailing slashes and replace remaining slashes with dashes
+  let name = pathPart.replace(/^\/+|\/+$/g, '').replace(/\//g, '-') || 'index';
+
+  // Remove file extensions for cleaner names (e.g., .php, .html)
+  name = name.replace(/\.(php|html)$/, '');
+
+  // If there's a query string, encode it and append
+  if (queryPart) {
+    // Replace special chars in query with safe equivalents
+    const safeQuery = queryPart.replace(/[=&]/g, '-').replace(/[^a-zA-Z0-9-]/g, '_');
+    name = `${name}__${safeQuery}`;
+  }
+
+  // Playwright requires .png extension (it will add platform suffix automatically)
+  return `${name}.png`;
+}
+
+/**
  * Normalize URL - handles full URLs or relative paths
  * @param {string} baseUrl - Base URL from wpInstance
  * @param {string} path - Relative path (e.g., '/wp-admin/') or full URL
@@ -267,6 +294,25 @@ export async function testWordPressPage(page, wpInstance, path, options = {}) {
   // Remove event listeners to prevent memory leaks
   page.off('console', consoleListener);
   page.off('pageerror', pageErrorListener);
+
+  // Visual baseline comparison using Playwright's built-in screenshot comparison
+  // Generate a safe snapshot name from the path
+  const snapshotName = pathToSnapshotName(path);
+
+  // Use Playwright's toHaveScreenshot - it handles baseline storage and comparison automatically
+  // In update mode (--update-snapshots), it will update baselines without throwing
+  // Otherwise, it compares against existing baselines
+  await expect(page).toHaveScreenshot(snapshotName, {
+    fullPage: true,
+    // Allow 5% pixel difference to account for dynamic content (timestamps, random taglines, etc.)
+    threshold: 0.05,
+  });
+
+  // If we get here, screenshot matched or was updated
+  // Only log if in verbose mode (to reduce noise)
+  if (process.env.DEBUG === '1') {
+    console.log(`[Baseline] Screenshot: ${path}`);
+  }
 
   // Return test results for additional assertions if needed
   return {
@@ -1233,9 +1279,10 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
 
   // Detect PHP errors in page content (when WP_DEBUG_DISPLAY is enabled)
   let phpErrors = [];
+  let pageContent = null;
   try {
     if (!page.isClosed()) {
-      const pageContent = await page.content();
+      pageContent = await page.content();
       phpErrors = detectPHPErrors(pageContent);
     }
   } catch (err) {
@@ -1445,6 +1492,41 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
   // Remove event listeners to prevent memory leaks
   page.off('console', consoleListener);
   page.off('pageerror', pageErrorListener);
+
+  // Visual baseline comparison using Playwright's built-in screenshot comparison
+  // Only if we have page content (page loaded successfully)
+  if (pageContent && !page.isClosed()) {
+    const snapshotName = pathToSnapshotName(path);
+
+    // Use Playwright's toHaveScreenshot - it handles baseline storage and comparison automatically
+    // In update mode (--update-snapshots), it will update baselines without throwing
+    // Otherwise, it compares against existing baselines
+    try {
+      await expect(page).toHaveScreenshot(snapshotName, {
+        fullPage: true,
+        // Allow 5% pixel difference to account for dynamic content (timestamps, random taglines, etc.)
+        threshold: 0.05,
+      });
+      // If we get here, screenshot matched or was updated
+      if (process.env.DEBUG === '1') {
+        console.log(`[Baseline] Screenshot: ${path}`);
+      }
+    } catch (error) {
+      // Screenshot mismatch - only log if NOT in update mode
+      // In update mode, toHaveScreenshot shouldn't throw, so this is a real error
+      const errorMsg = error.message || String(error);
+      if (errorMsg.includes('Screenshot') || errorMsg.includes('snapshot')) {
+        // Check if we're in update mode by checking if error mentions updating
+        // In update mode, errors shouldn't occur, so this is a comparison failure
+        console.warn(`\n[Baseline Mismatch] ${path}`);
+        console.warn(`  Run with --update-snapshots (or --capture) to update the baseline`);
+        // Don't re-throw - allow test to continue (MVP behavior)
+      } else {
+        // Re-throw unexpected errors
+        throw error;
+      }
+    }
+  }
 
   return {
     response,

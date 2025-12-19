@@ -75,14 +75,25 @@ async function main() {
     // Do not forward --debug to Playwright
   }
 
+  // Handle CAPTURE flag - map to Playwright's --update-snapshots
+  // Check both options (--capture=value) and passthrough (--capture as flag) BEFORE filtering
+  const hasCaptureFlag = options.capture || passthrough.includes('--capture') || process.env.CAPTURE === '1';
+
   // Forward all other options to Playwright (e.g., --grep, --grep-invert, etc.)
-  const forwardedArgs = [...passthrough];
+  // Filter out --capture from passthrough
+  const forwardedArgs = passthrough.filter(arg => arg !== '--capture');
+
+  if (hasCaptureFlag) {
+    // Map --capture to Playwright's --update-snapshots flag
+    forwardedArgs.push('--update-snapshots');
+    console.log('[Baseline] Capture mode enabled - will update screenshot snapshots');
+  }
   for (const [key, value] of Object.entries(options)) {
       // Skip custom options that we handle ourselves
       if (key !== 'blueprint' && key !== 'debugLog' && key !== 'debug-log' &&
           key !== 'import' && key !== 'theme' && key !== 'plugin' &&
           key !== 'wpversion' && key !== 'wp-version' &&
-          key !== 'full' && key !== 'fullMode' && key !== 'debug') {
+          key !== 'full' && key !== 'fullMode' && key !== 'debug' && key !== 'capture') {
         forwardedArgs.push(`--${key}=${value}`);
       }
   }
