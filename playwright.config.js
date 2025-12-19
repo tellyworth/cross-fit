@@ -46,10 +46,9 @@ export default defineConfig({
   timeout: 20000, // 20 seconds per test (reduced from 30s for faster feedback)
   expect: {
     timeout: 3000, // 3 seconds for assertions (reduced from 5s)
-    // Screenshot comparison settings (default threshold - can be overridden per call)
     toHaveScreenshot: {
-      // Default threshold - individual calls can override this
-      threshold: 0.05, // 5% default (matches what we use in test helpers)
+      // Default pixel difference ratio (0-1) - can be overridden per-call or via --threshold
+      maxDiffPixelRatio: 0.05, // 5% default
     },
   },
 });

@@ -1,5 +1,11 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
+import { rmSync, existsSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // Simple argparse: supports --key=value and --key value forms
 function parseArgs(argv) {
@@ -79,9 +85,50 @@ async function main() {
   // Check both options (--capture=value) and passthrough (--capture as flag) BEFORE filtering
   const hasCaptureFlag = options.capture || passthrough.includes('--capture') || process.env.CAPTURE === '1';
 
+  // Handle CLEAR_SNAPSHOTS flag - delete test-snapshots directory
+  const hasClearSnapshotsFlag = options['clear-snapshots'] || passthrough.includes('--clear-snapshots') ||
+                                 options.clearSnapshots || process.env.CLEAR_SNAPSHOTS === '1';
+  if (hasClearSnapshotsFlag) {
+    const projectRoot = join(__dirname, '..');
+    const snapshotsDir = join(projectRoot, 'test-snapshots');
+    if (existsSync(snapshotsDir)) {
+      rmSync(snapshotsDir, { recursive: true, force: true });
+      console.log('[Baseline] Cleared test-snapshots directory');
+    } else {
+      console.log('[Baseline] test-snapshots directory does not exist (nothing to clear)');
+    }
+  }
+
+  // Handle SKIP_SNAPSHOTS flag - skip screenshot comparison entirely
+  const hasSkipSnapshotsFlag = options['skip-snapshots'] || passthrough.includes('--skip-snapshots') ||
+                                options.skipSnapshots || process.env.SKIP_SNAPSHOTS === '1';
+  if (hasSkipSnapshotsFlag) {
+    env.SKIP_SNAPSHOTS = '1';
+    console.log('[Baseline] Screenshot comparison disabled');
+  }
+
+  // Handle SCREENSHOT_THRESHOLD - set pixel difference threshold (0-1, default 0.05)
+  const screenshotThreshold = options['screenshot-threshold'] || options.screenshotThreshold ||
+                              options.threshold || process.env.SCREENSHOT_THRESHOLD;
+
+  const thresholdValue = screenshotThreshold ? parseFloat(screenshotThreshold) : 0.05;
+  if (isNaN(thresholdValue) || thresholdValue < 0 || thresholdValue > 1) {
+    console.warn(`[Baseline] Invalid screenshot threshold: ${screenshotThreshold}. Must be between 0 and 1. Using default 0.05.`);
+    env.SCREENSHOT_THRESHOLD = '0.05';
+  } else {
+    env.SCREENSHOT_THRESHOLD = thresholdValue.toString();
+    if (screenshotThreshold) {
+      console.log(`[Baseline] Screenshot threshold: ${thresholdValue} (${(thresholdValue * 100).toFixed(1)}%)`);
+    }
+  }
+
   // Forward all other options to Playwright (e.g., --grep, --grep-invert, etc.)
-  // Filter out --capture from passthrough
-  const forwardedArgs = passthrough.filter(arg => arg !== '--capture');
+  // Filter out snapshot-related flags from passthrough
+  const forwardedArgs = passthrough.filter(arg =>
+    arg !== '--capture' &&
+    arg !== '--clear-snapshots' &&
+    arg !== '--skip-snapshots'
+  );
 
   if (hasCaptureFlag) {
     // Map --capture to Playwright's --update-snapshots flag
@@ -93,7 +140,10 @@ async function main() {
       if (key !== 'blueprint' && key !== 'debugLog' && key !== 'debug-log' &&
           key !== 'import' && key !== 'theme' && key !== 'plugin' &&
           key !== 'wpversion' && key !== 'wp-version' &&
-          key !== 'full' && key !== 'fullMode' && key !== 'debug' && key !== 'capture') {
+          key !== 'full' && key !== 'fullMode' && key !== 'debug' &&
+          key !== 'capture' && key !== 'clear-snapshots' && key !== 'clearSnapshots' &&
+          key !== 'skip-snapshots' && key !== 'skipSnapshots' &&
+          key !== 'screenshot-threshold' && key !== 'screenshotThreshold' && key !== 'threshold') {
         forwardedArgs.push(`--${key}=${value}`);
       }
   }

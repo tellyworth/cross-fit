@@ -296,22 +296,16 @@ export async function testWordPressPage(page, wpInstance, path, options = {}) {
   page.off('pageerror', pageErrorListener);
 
   // Visual baseline comparison using Playwright's built-in screenshot comparison
-  // Generate a safe snapshot name from the path
-  const snapshotName = pathToSnapshotName(path);
+  if (process.env.SKIP_SNAPSHOTS !== '1') {
+    const snapshotName = pathToSnapshotName(path);
+    const options = { fullPage: true };
 
-  // Use Playwright's toHaveScreenshot - it handles baseline storage and comparison automatically
-  // In update mode (--update-snapshots), it will update baselines without throwing
-  // Otherwise, it compares against existing baselines
-  await expect(page).toHaveScreenshot(snapshotName, {
-    fullPage: true,
-    // Allow 5% pixel difference to account for dynamic content (timestamps, random taglines, etc.)
-    threshold: 0.05,
-  });
+    // Override threshold if specified via CLI
+    if (process.env.SCREENSHOT_THRESHOLD) {
+      options.maxDiffPixelRatio = parseFloat(process.env.SCREENSHOT_THRESHOLD);
+    }
 
-  // If we get here, screenshot matched or was updated
-  // Only log if in verbose mode (to reduce noise)
-  if (process.env.DEBUG === '1') {
-    console.log(`[Baseline] Screenshot: ${path}`);
+    await expect(page).toHaveScreenshot(snapshotName, options);
   }
 
   // Return test results for additional assertions if needed
@@ -1494,35 +1488,23 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
   page.off('pageerror', pageErrorListener);
 
   // Visual baseline comparison using Playwright's built-in screenshot comparison
-  // Only if we have page content (page loaded successfully)
-  if (pageContent && !page.isClosed()) {
+  if (pageContent && !page.isClosed() && process.env.SKIP_SNAPSHOTS !== '1') {
     const snapshotName = pathToSnapshotName(path);
+    const options = { fullPage: true };
 
-    // Use Playwright's toHaveScreenshot - it handles baseline storage and comparison automatically
-    // In update mode (--update-snapshots), it will update baselines without throwing
-    // Otherwise, it compares against existing baselines
+    // Override threshold if specified via CLI
+    if (process.env.SCREENSHOT_THRESHOLD) {
+      options.maxDiffPixelRatio = parseFloat(process.env.SCREENSHOT_THRESHOLD);
+    }
+
     try {
-      await expect(page).toHaveScreenshot(snapshotName, {
-        fullPage: true,
-        // Allow 5% pixel difference to account for dynamic content (timestamps, random taglines, etc.)
-        threshold: 0.05,
-      });
-      // If we get here, screenshot matched or was updated
-      if (process.env.DEBUG === '1') {
-        console.log(`[Baseline] Screenshot: ${path}`);
-      }
+      await expect(page).toHaveScreenshot(snapshotName, options);
     } catch (error) {
-      // Screenshot mismatch - only log if NOT in update mode
-      // In update mode, toHaveScreenshot shouldn't throw, so this is a real error
       const errorMsg = error.message || String(error);
       if (errorMsg.includes('Screenshot') || errorMsg.includes('snapshot')) {
-        // Check if we're in update mode by checking if error mentions updating
-        // In update mode, errors shouldn't occur, so this is a comparison failure
         console.warn(`\n[Baseline Mismatch] ${path}`);
         console.warn(`  Run with --update-snapshots (or --capture) to update the baseline`);
-        // Don't re-throw - allow test to continue (MVP behavior)
       } else {
-        // Re-throw unexpected errors
         throw error;
       }
     }
