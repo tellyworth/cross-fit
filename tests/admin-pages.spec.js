@@ -179,16 +179,6 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
 
     // Process menu items with concurrency limiting using the context pool
     const startTime = Date.now();
-    const formatTimestamp = () => {
-      const now = new Date();
-      const hours = String(now.getHours()).padStart(2, '0');
-      const minutes = String(now.getMinutes()).padStart(2, '0');
-      const seconds = String(now.getSeconds()).padStart(2, '0');
-      const millis = String(now.getMilliseconds()).padStart(3, '0');
-      return `${hours}:${minutes}:${seconds}.${millis}`;
-    };
-
-    console.log(`[${formatTimestamp()}] [Admin Menu Test] Starting parallel execution of ${menuItemTests.length} items with concurrency limit ${concurrencyLimit}`);
 
     const menuResults = await processWithConcurrencyLimit(
       menuItemTests,
@@ -203,21 +193,14 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
             description: menuItem.description,
             timeout: 20000, // 20 seconds per page
           });
-          const itemDuration = Date.now() - itemStartTime;
-          console.log(`[${formatTimestamp()}] [Admin Menu Test] ✓ ${menuItem.title} completed in ${itemDuration}ms`);
           return { success: true, menuItem };
         } catch (error) {
-          const itemDuration = Date.now() - itemStartTime;
-          console.log(`[${formatTimestamp()}] [Admin Menu Test] ✗ ${menuItem.title} failed after ${itemDuration}ms: ${error.message}`);
           return { success: false, menuItem, error: error.message };
         } finally {
           await testPage.close();
         }
       }
     );
-
-    const totalDuration = Date.now() - startTime;
-    console.log(`[${formatTimestamp()}] [Admin Menu Test] Completed ${menuItemTests.length} items in ${totalDuration}ms (${(totalDuration / 1000).toFixed(1)}s)`);
 
     // Clean up context pool (but keep contexts open for submenu items if in full mode)
     if (!isFullMode) {
@@ -278,7 +261,6 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
 
           // Test all submenu items with concurrency limiting using the same context pool
           const submenuStartTime = Date.now();
-          console.log(`[${formatTimestamp()}] [Admin Submenu Test] Starting parallel execution of ${submenuItemTests.length} items with concurrency limit ${concurrencyLimit}`);
 
           const submenuResults = await processWithConcurrencyLimit(
             submenuItemTests,
@@ -293,21 +275,14 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
                   description: submenuItem.description,
                   timeout: 20000,
                 });
-                const itemDuration = Date.now() - itemStartTime;
-                console.log(`[${formatTimestamp()}] [Admin Submenu Test] ✓ ${submenuItem.title} completed in ${itemDuration}ms`);
                 return { success: true, submenuItem };
               } catch (error) {
-                const itemDuration = Date.now() - itemStartTime;
-                console.log(`[${formatTimestamp()}] [Admin Submenu Test] ✗ ${submenuItem.title} failed after ${itemDuration}ms: ${error.message}`);
                 return { success: false, submenuItem, error: error.message };
               } finally {
                 await testPage.close();
               }
             }
           );
-
-          const submenuTotalDuration = Date.now() - submenuStartTime;
-          console.log(`[${formatTimestamp()}] [Admin Submenu Test] Completed ${submenuItemTests.length} items in ${submenuTotalDuration}ms (${(submenuTotalDuration / 1000).toFixed(1)}s)`);
 
           // Clean up context pool after submenu items
           await Promise.all(contextPool.map(ctx => ctx.close()));
