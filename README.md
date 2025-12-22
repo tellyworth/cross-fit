@@ -104,7 +104,7 @@ npm test -- --clear-snapshots
 # Skip screenshot comparison entirely (faster test runs)
 npm test -- --skip-snapshots
 
-# Set custom pixel difference threshold (0-1, default 0.05 = 5%)
+# Set custom pixel difference threshold (0-1, default 0.02 = 2%)
 npm test -- --threshold=0.1  # Allow 10% pixel difference
 npm test -- --threshold=0.01 # Stricter: only 1% difference allowed
 ```
@@ -112,7 +112,7 @@ npm test -- --threshold=0.01 # Stricter: only 1% difference allowed
 **How it works:**
 - Screenshots are stored in `test-snapshots/` directory (gitignored)
 - Uses Playwright's built-in screenshot comparison with configurable threshold
-- Default threshold is 5% (`maxDiffPixelRatio: 0.05`) to account for dynamic content (timestamps, random taglines, etc.)
+- Default threshold is 2% (`maxDiffPixelRatio: 0.02`) to account for dynamic content (timestamps)
 - Mismatches are logged as warnings but don't fail tests (MVP behavior)
 - Screenshots are captured automatically for all pages tested in `public-pages.spec.js` and `admin-pages.spec.js`
 

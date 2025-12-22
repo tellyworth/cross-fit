@@ -48,7 +48,7 @@ export default defineConfig({
     timeout: 3000, // 3 seconds for assertions (reduced from 5s)
     toHaveScreenshot: {
       // Default pixel difference ratio (0-1) - can be overridden per-call or via --threshold
-      maxDiffPixelRatio: 0.05, // 5% default
+      maxDiffPixelRatio: 0.02, // 2% default
     },
   },
 });
