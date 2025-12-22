@@ -93,13 +93,9 @@ async function main() {
     const snapshotsDir = join(projectRoot, 'test-snapshots');
     if (existsSync(snapshotsDir)) {
       rmSync(snapshotsDir, { recursive: true, force: true });
-      console.log('[Baseline] Cleared test-snapshots directory');
-    } else {
-      console.log('[Baseline] test-snapshots directory does not exist (nothing to clear)');
     }
     // Skip screenshot comparison after clearing
     env.SKIP_SNAPSHOTS = '1';
-    console.log('[Baseline] Screenshot comparison disabled for this run');
   }
 
   // Handle SKIP_SNAPSHOTS flag - skip screenshot comparison entirely
@@ -107,7 +103,6 @@ async function main() {
                                 options.skipSnapshots || process.env.SKIP_SNAPSHOTS === '1';
   if (hasSkipSnapshotsFlag) {
     env.SKIP_SNAPSHOTS = '1';
-    console.log('[Baseline] Screenshot comparison disabled');
   }
 
   // Handle SCREENSHOT_THRESHOLD - set pixel difference threshold (0-1, default 0.05)
@@ -120,9 +115,19 @@ async function main() {
     env.SCREENSHOT_THRESHOLD = '0.05';
   } else {
     env.SCREENSHOT_THRESHOLD = thresholdValue.toString();
-    if (screenshotThreshold) {
-      console.log(`[Baseline] Screenshot threshold: ${thresholdValue} (${(thresholdValue * 100).toFixed(1)}%)`);
-    }
+  }
+
+  // Print single consolidated message about snapshot mode
+  if (hasClearSnapshotsFlag) {
+    console.log('[Baseline] Cleared snapshots, screenshot comparison disabled');
+  } else if (hasSkipSnapshotsFlag) {
+    console.log('[Baseline] Screenshot comparison disabled');
+  } else if (hasCaptureFlag) {
+    const thresholdMsg = screenshotThreshold ? ` (threshold: ${(thresholdValue * 100).toFixed(1)}%)` : '';
+    console.log(`[Baseline] Creating/updating snapshots${thresholdMsg}`);
+  } else {
+    const thresholdMsg = screenshotThreshold ? ` (threshold: ${(thresholdValue * 100).toFixed(1)}%)` : '';
+    console.log(`[Baseline] Comparing against snapshots${thresholdMsg}`);
   }
 
   // Forward all other options to Playwright (e.g., --grep, --grep-invert, etc.)
