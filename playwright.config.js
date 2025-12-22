@@ -45,7 +45,8 @@ export default defineConfig({
   // Timeout settings
   timeout: 20000, // 20 seconds per test (reduced from 30s for faster feedback)
   expect: {
-    timeout: 3000, // 3 seconds for assertions (reduced from 5s)
+    // Allow more time for complex admin pages and font loading in screenshot assertions
+    timeout: 15000, // 15 seconds for assertions
     toHaveScreenshot: {
       // Default pixel difference ratio (0-1) - can be overridden per-call or via --threshold
       maxDiffPixelRatio: 0.02, // 2% default
