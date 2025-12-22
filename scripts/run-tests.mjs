@@ -85,7 +85,7 @@ async function main() {
   // Check both options (--capture=value) and passthrough (--capture as flag) BEFORE filtering
   const hasCaptureFlag = options.capture || passthrough.includes('--capture') || process.env.CAPTURE === '1';
 
-  // Handle CLEAR_SNAPSHOTS flag - delete test-snapshots directory
+  // Handle CLEAR_SNAPSHOTS flag - delete test-snapshots directory and skip screenshot comparison
   const hasClearSnapshotsFlag = options['clear-snapshots'] || passthrough.includes('--clear-snapshots') ||
                                  options.clearSnapshots || process.env.CLEAR_SNAPSHOTS === '1';
   if (hasClearSnapshotsFlag) {
@@ -97,6 +97,9 @@ async function main() {
     } else {
       console.log('[Baseline] test-snapshots directory does not exist (nothing to clear)');
     }
+    // Skip screenshot comparison after clearing
+    env.SKIP_SNAPSHOTS = '1';
+    console.log('[Baseline] Screenshot comparison disabled for this run');
   }
 
   // Handle SKIP_SNAPSHOTS flag - skip screenshot comparison entirely
