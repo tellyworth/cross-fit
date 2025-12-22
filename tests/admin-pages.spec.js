@@ -38,30 +38,34 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
 
     expect(optionsResponse.status()).toBe(200);
 
-    // Wait for the admin email field - this ensures the page is fully loaded and interactive
-    // Using admin_email instead of blogdescription to avoid affecting frontend screenshots
-    await expect(page.locator('#admin_email')).toBeVisible({ timeout: 15000 });
+    // Wait for the form to be ready - check for any visible input field
+    // Using start_of_week dropdown instead of blogdescription to avoid affecting frontend screenshots
+    // start_of_week is a backend-only setting that doesn't appear on public pages
+    await expect(page.locator('#start_of_week')).toBeVisible({ timeout: 15000 });
 
-    // Get current admin email value
-    const currentEmail = await page.inputValue('#admin_email');
+    // Get current week start value
+    const currentStartOfWeek = await page.locator('#start_of_week').inputValue();
 
-    // Generate a new test email (must be valid email format)
-    const newEmail = `test-${Date.now()}@example.com`;
+    // Generate a new test value (cycle through days: 0=Sunday, 1=Monday, etc.)
+    // Use a different day to ensure the change is saved
+    const days = ['0', '1', '2', '3', '4', '5', '6'];
+    const currentIndex = days.indexOf(currentStartOfWeek);
+    const newStartOfWeek = days[(currentIndex + 1) % days.length];
 
-    // Fill in the new email
-    await page.fill('#admin_email', newEmail);
+    // Select the new value
+    await page.selectOption('#start_of_week', newStartOfWeek);
 
     // Submit the form
     await page.click('#submit');
 
     // Wait for form submission - wait for navigation and then for the field to be visible again
     // The field being visible indicates the page has reloaded after form submission
-    await expect(page.locator('#admin_email')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('#start_of_week')).toBeVisible({ timeout: 15000 });
 
     // Check if the change was saved by reading the value again
-    const savedEmail = await page.inputValue('#admin_email');
+    const savedStartOfWeek = await page.locator('#start_of_week').inputValue();
 
-    expect(savedEmail).toBe(newEmail);
+    expect(savedStartOfWeek).toBe(newStartOfWeek);
   });
 
   test('should access all admin menu items without errors', async ({ page, wpInstance }) => {
