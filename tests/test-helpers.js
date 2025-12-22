@@ -1321,7 +1321,7 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
   // Check for admin-specific elements
   const adminCheck = await page.evaluate(() => {
     return {
-      hasAdminBody: document.body.classList.contains('wp-admin'),
+      hasAdminBody: document.body?.classList?.contains('wp-admin') || false,
       hasAdminBar: !!document.querySelector('#wpadminbar'),
       hasAdminMenu: !!document.querySelector('#adminmenumain'),
       hasWpBodyContent: !!document.querySelector('#wpbody-content'),
@@ -1530,6 +1530,13 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
     // In capture mode, always attempt to create/update snapshots.
     // In normal mode, only compare if the snapshot file already exists.
     if (isCaptureMode || existsSync(snapshotPath)) {
+      // Wait for network to be idle before taking screenshot (ensures fonts/resources are loaded)
+      try {
+        await page.waitForLoadState('networkidle', { timeout: 10000 });
+      } catch (e) {
+        // If networkidle times out, continue anyway - page may be stable enough
+      }
+
       const options = { fullPage: true };
 
       // Override threshold if specified via CLI
