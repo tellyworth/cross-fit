@@ -1,4 +1,4 @@
-import { readDebugLog } from './test-helpers.js';
+import { readDebugLog, getScreenshotStats } from './test-helpers.js';
 
 /**
  * Global teardown for Playwright tests
@@ -81,6 +81,23 @@ async function globalTeardown(wpInstance) {
   delete process.env.WP_PLAYGROUND_URL;
   delete process.env.WP_PLAYGROUND_DEBUG_LOG;
   delete process.env.WP_DEBUG_LOG_LINES;
+
+  // Print screenshot comparison summary
+  if (process.env.SKIP_SNAPSHOTS !== '1') {
+    const stats = getScreenshotStats();
+    if (stats.checked > 0 || stats.skipped > 0) {
+      const parts = [];
+      if (stats.checked > 0) {
+        parts.push(`${stats.checked} checked`);
+      }
+      if (stats.skipped > 0) {
+        parts.push(`${stats.skipped} skipped`);
+      }
+      if (parts.length > 0) {
+        console.log(`[Baseline] Screenshots: ${parts.join(', ')}`);
+      }
+    }
+  }
 }
 
 export default globalTeardown;

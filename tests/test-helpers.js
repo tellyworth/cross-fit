@@ -1,5 +1,28 @@
 import { expect } from '@playwright/test';
 import { readFileSync, existsSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import os from 'os';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Track screenshot comparison stats
+const screenshotStats = {
+  checked: 0,
+  skipped: 0,
+};
+
+// Export function to get stats (for summary reporting)
+export function getScreenshotStats() {
+  return { ...screenshotStats };
+}
+
+// Reset stats (called at start of test run)
+export function resetScreenshotStats() {
+  screenshotStats.checked = 0;
+  screenshotStats.skipped = 0;
+}
 
 /**
  * Reusable test helpers for WordPress E2E testing
@@ -31,6 +54,21 @@ function pathToSnapshotName(path) {
 
   // Playwright requires .png extension (it will add platform suffix automatically)
   return `${name}.png`;
+}
+
+/**
+ * Get the full path to a snapshot file
+ * Playwright uses snapshotPathTemplate: 'test-snapshots/{arg}{ext}'
+ * and adds platform suffix (e.g., -darwin)
+ */
+function getSnapshotPath(snapshotName) {
+  const platform = os.platform() === 'darwin' ? 'darwin' : os.platform() === 'win32' ? 'win32' : 'linux';
+  // Remove .png extension, add platform suffix, then add .png back
+  const baseName = snapshotName.replace(/\.png$/, '');
+  const platformName = `${baseName}-${platform}.png`;
+  // Playwright stores in test-snapshots/ relative to project root
+  // We need to go up from tests/ to project root
+  return join(__dirname, '..', 'test-snapshots', platformName);
 }
 
 /**
@@ -298,24 +336,34 @@ export async function testWordPressPage(page, wpInstance, path, options = {}) {
   // Visual baseline comparison using Playwright's built-in screenshot comparison
   if (process.env.SKIP_SNAPSHOTS !== '1') {
     const snapshotName = pathToSnapshotName(path);
-    const options = { fullPage: true };
+    const snapshotPath = getSnapshotPath(snapshotName);
+    const isCaptureMode = process.env.CAPTURE === '1' || process.argv.includes('--update-snapshots');
 
-    // Override threshold if specified via CLI
-    if (process.env.SCREENSHOT_THRESHOLD) {
-      options.maxDiffPixelRatio = parseFloat(process.env.SCREENSHOT_THRESHOLD);
-    }
+    // Only compare if snapshot exists OR if in capture mode (to create it)
+    if (existsSync(snapshotPath) || isCaptureMode) {
+      const options = { fullPage: true };
 
-    try {
-      await expect(page).toHaveScreenshot(snapshotName, options);
-    } catch (error) {
-      const errorMsg = error.message || String(error);
-      if (errorMsg.includes('Screenshot') || errorMsg.includes('snapshot')) {
-        // Log mismatch (update mode shouldn't throw, so this is a real mismatch)
-        console.warn(`[Baseline Mismatch] ${path}`);
-        // Don't re-throw - allow test to continue (MVP behavior)
-      } else {
-        throw error;
+      // Override threshold if specified via CLI
+      if (process.env.SCREENSHOT_THRESHOLD) {
+        options.maxDiffPixelRatio = parseFloat(process.env.SCREENSHOT_THRESHOLD);
       }
+
+      try {
+        await expect(page).toHaveScreenshot(snapshotName, options);
+        screenshotStats.checked++;
+      } catch (error) {
+        const errorMsg = error.message || String(error);
+        if (errorMsg.includes('Screenshot') || errorMsg.includes('snapshot')) {
+          // Log mismatch and re-throw to fail the test
+          console.warn(`[Baseline Mismatch] ${path}`);
+          throw error;
+        } else {
+          throw error;
+        }
+      }
+    } else {
+      // Snapshot doesn't exist and not in capture mode - skip silently
+      screenshotStats.skipped++;
     }
   }
 
@@ -1501,24 +1549,34 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
   // Visual baseline comparison using Playwright's built-in screenshot comparison
   if (pageContent && !page.isClosed() && process.env.SKIP_SNAPSHOTS !== '1') {
     const snapshotName = pathToSnapshotName(path);
-    const options = { fullPage: true };
+    const snapshotPath = getSnapshotPath(snapshotName);
+    const isCaptureMode = process.env.CAPTURE === '1' || process.argv.includes('--update-snapshots');
 
-    // Override threshold if specified via CLI
-    if (process.env.SCREENSHOT_THRESHOLD) {
-      options.maxDiffPixelRatio = parseFloat(process.env.SCREENSHOT_THRESHOLD);
-    }
+    // Only compare if snapshot exists OR if in capture mode (to create it)
+    if (existsSync(snapshotPath) || isCaptureMode) {
+      const options = { fullPage: true };
 
-    try {
-      await expect(page).toHaveScreenshot(snapshotName, options);
-    } catch (error) {
-      const errorMsg = error.message || String(error);
-      if (errorMsg.includes('Screenshot') || errorMsg.includes('snapshot')) {
-        // Log mismatch (update mode shouldn't throw, so this is a real mismatch)
-        console.warn(`[Baseline Mismatch] ${path}`);
-        // Don't re-throw - allow test to continue (MVP behavior)
-      } else {
-        throw error;
+      // Override threshold if specified via CLI
+      if (process.env.SCREENSHOT_THRESHOLD) {
+        options.maxDiffPixelRatio = parseFloat(process.env.SCREENSHOT_THRESHOLD);
       }
+
+      try {
+        await expect(page).toHaveScreenshot(snapshotName, options);
+        screenshotStats.checked++;
+      } catch (error) {
+        const errorMsg = error.message || String(error);
+        if (errorMsg.includes('Screenshot') || errorMsg.includes('snapshot')) {
+          // Log mismatch and re-throw to fail the test
+          console.warn(`[Baseline Mismatch] ${path}`);
+          throw error;
+        } else {
+          throw error;
+        }
+      }
+    } else {
+      // Snapshot doesn't exist and not in capture mode - skip silently
+      screenshotStats.skipped++;
     }
   }
 

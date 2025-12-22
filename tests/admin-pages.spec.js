@@ -38,29 +38,30 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
 
     expect(optionsResponse.status()).toBe(200);
 
-    // Wait for the form field - this ensures the page is fully loaded and interactive
-    await expect(page.locator('#blogdescription')).toBeVisible({ timeout: 15000 });
+    // Wait for the admin email field - this ensures the page is fully loaded and interactive
+    // Using admin_email instead of blogdescription to avoid affecting frontend screenshots
+    await expect(page.locator('#admin_email')).toBeVisible({ timeout: 15000 });
 
-    // Get current site tagline value (less likely to conflict with other tests)
-    const currentTagline = await page.inputValue('#blogdescription');
+    // Get current admin email value
+    const currentEmail = await page.inputValue('#admin_email');
 
-    // Generate a new test tagline
-    const newTagline = `Test Tagline ${Date.now()}`;
+    // Generate a new test email (must be valid email format)
+    const newEmail = `test-${Date.now()}@example.com`;
 
-    // Fill in the new tagline
-    await page.fill('#blogdescription', newTagline);
+    // Fill in the new email
+    await page.fill('#admin_email', newEmail);
 
     // Submit the form
     await page.click('#submit');
 
     // Wait for form submission - wait for navigation and then for the field to be visible again
     // The field being visible indicates the page has reloaded after form submission
-    await expect(page.locator('#blogdescription')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('#admin_email')).toBeVisible({ timeout: 15000 });
 
     // Check if the change was saved by reading the value again
-    const savedTagline = await page.inputValue('#blogdescription');
+    const savedEmail = await page.inputValue('#admin_email');
 
-    expect(savedTagline).toBe(newTagline);
+    expect(savedEmail).toBe(newEmail);
   });
 
   test('should access all admin menu items without errors', async ({ page, wpInstance }) => {

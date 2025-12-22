@@ -80,10 +80,28 @@ function big_mistake_trigger_errors() {
       }
     });
   }
+
 }
 
 // Hook early to catch all errors
 add_action('init', 'big_mistake_trigger_errors', 1);
+
+/**
+ * Trigger visual diff for testing screenshot comparison
+ * Injects a visible element that exceeds the 2% threshold
+ */
+function big_mistake_trigger_visual_diff() {
+  $visual_diff = isset($_GET['trigger_visual_diff']) || isset($_SERVER['HTTP_X_TRIGGER_VISUAL_DIFF']);
+  if ($visual_diff) {
+    add_action('wp_footer', function() {
+      // Inject a small but visible element that will cause a visual diff
+      // This creates a colored box that should exceed 2% threshold
+      echo '<div style="position: fixed; top: 10px; right: 10px; width: 100px; height: 100px; background: #ff0000; z-index: 99999; border: 2px solid #000;"></div>';
+    }, 999);
+  }
+}
+
+add_action('init', 'big_mistake_trigger_visual_diff', 1);
 
 /**
  * Trigger an HTTP request during page rendering for testing
