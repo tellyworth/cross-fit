@@ -80,6 +80,42 @@ npm test -- --wpversion=6.5 --theme=mytheme@1.2 --plugin=akismet@3.4.5,jetpack@4
 
 **Note**: Version numbers (using `@version` notation) only apply to plugins and themes downloaded from wordpress.org. They are ignored for local file paths and URLs.
 
+#### Screenshot Baseline Comparison
+
+Cross-Fit can capture and compare screenshots of pages to detect visual changes between plugin versions, themes, or WordPress updates.
+
+**Capture baseline screenshots:**
+```bash
+# Capture screenshots for all tested pages (before state)
+npm test -- --plugin=akismet@5.2 --capture
+```
+
+**Compare against baseline:**
+```bash
+# Compare current state against captured baseline (after state)
+npm test -- --plugin=akismet@5.5
+```
+
+**Manage snapshots:**
+```bash
+# Clear all captured snapshots
+npm test -- --clear-snapshots
+
+# Skip screenshot comparison entirely (faster test runs)
+npm test -- --skip-snapshots
+
+# Set custom pixel difference threshold (0-1, default 0.05 = 5%)
+npm test -- --threshold=0.1  # Allow 10% pixel difference
+npm test -- --threshold=0.01 # Stricter: only 1% difference allowed
+```
+
+**How it works:**
+- Screenshots are stored in `test-snapshots/` directory (gitignored)
+- Uses Playwright's built-in screenshot comparison with configurable threshold
+- Default threshold is 5% (`maxDiffPixelRatio: 0.05`) to account for dynamic content (timestamps, random taglines, etc.)
+- Mismatches are logged as warnings but don't fail tests (MVP behavior)
+- Screenshots are captured automatically for all pages tested in `public-pages.spec.js` and `admin-pages.spec.js`
+
 #### Running All Tests
 
 - `npm test` - Run standard tests in headless mode
