@@ -139,6 +139,8 @@ async function main() {
   );
 
   if (hasCaptureFlag) {
+    // Set CAPTURE env var so test helpers know we're in capture mode
+    env.CAPTURE = '1';
     // Map --capture to Playwright's --update-snapshots flag
     forwardedArgs.push('--update-snapshots');
     console.log('[Baseline] Capture mode enabled - will update screenshot snapshots');

@@ -2,27 +2,9 @@ import { expect } from '@playwright/test';
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import os from 'os';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
-// Track screenshot comparison stats
-const screenshotStats = {
-  checked: 0,
-  skipped: 0,
-};
-
-// Export function to get stats (for summary reporting)
-export function getScreenshotStats() {
-  return { ...screenshotStats };
-}
-
-// Reset stats (called at start of test run)
-export function resetScreenshotStats() {
-  screenshotStats.checked = 0;
-  screenshotStats.skipped = 0;
-}
 
 /**
  * Reusable test helpers for WordPress E2E testing
@@ -59,16 +41,10 @@ function pathToSnapshotName(path) {
 /**
  * Get the full path to a snapshot file
  * Playwright uses snapshotPathTemplate: 'test-snapshots/{arg}{ext}'
- * and adds platform suffix (e.g., -darwin)
+ * We store snapshots directly as '{arg}.png' in the 'test-snapshots' directory.
  */
 function getSnapshotPath(snapshotName) {
-  const platform = os.platform() === 'darwin' ? 'darwin' : os.platform() === 'win32' ? 'win32' : 'linux';
-  // Remove .png extension, add platform suffix, then add .png back
-  const baseName = snapshotName.replace(/\.png$/, '');
-  const platformName = `${baseName}-${platform}.png`;
-  // Playwright stores in test-snapshots/ relative to project root
-  // We need to go up from tests/ to project root
-  return join(__dirname, '..', 'test-snapshots', platformName);
+  return join(__dirname, '..', 'test-snapshots', snapshotName);
 }
 
 /**
@@ -337,10 +313,11 @@ export async function testWordPressPage(page, wpInstance, path, options = {}) {
   if (process.env.SKIP_SNAPSHOTS !== '1') {
     const snapshotName = pathToSnapshotName(path);
     const snapshotPath = getSnapshotPath(snapshotName);
-    const isCaptureMode = process.env.CAPTURE === '1' || process.argv.includes('--update-snapshots');
+    const isCaptureMode = process.env.CAPTURE === '1';
 
-    // Only compare if snapshot exists OR if in capture mode (to create it)
-    if (existsSync(snapshotPath) || isCaptureMode) {
+    // In capture mode, always attempt to create/update snapshots.
+    // In normal mode, only compare if the snapshot file already exists.
+    if (isCaptureMode || existsSync(snapshotPath)) {
       const options = { fullPage: true };
 
       // Override threshold if specified via CLI
@@ -350,20 +327,18 @@ export async function testWordPressPage(page, wpInstance, path, options = {}) {
 
       try {
         await expect(page).toHaveScreenshot(snapshotName, options);
-        screenshotStats.checked++;
       } catch (error) {
         const errorMsg = error.message || String(error);
         if (errorMsg.includes('Screenshot') || errorMsg.includes('snapshot')) {
-          // Log mismatch and re-throw to fail the test
-          console.warn(`[Baseline Mismatch] ${path}`);
-          throw error;
-        } else {
+          console.warn(
+            isCaptureMode
+              ? `[Baseline Capture Failed] ${path}: ${errorMsg}`
+              : `[Baseline Mismatch] ${path}`,
+          );
           throw error;
         }
+        throw error;
       }
-    } else {
-      // Snapshot doesn't exist and not in capture mode - skip silently
-      screenshotStats.skipped++;
     }
   }
 
@@ -1550,10 +1525,11 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
   if (pageContent && !page.isClosed() && process.env.SKIP_SNAPSHOTS !== '1') {
     const snapshotName = pathToSnapshotName(path);
     const snapshotPath = getSnapshotPath(snapshotName);
-    const isCaptureMode = process.env.CAPTURE === '1' || process.argv.includes('--update-snapshots');
+    const isCaptureMode = process.env.CAPTURE === '1';
 
-    // Only compare if snapshot exists OR if in capture mode (to create it)
-    if (existsSync(snapshotPath) || isCaptureMode) {
+    // In capture mode, always attempt to create/update snapshots.
+    // In normal mode, only compare if the snapshot file already exists.
+    if (isCaptureMode || existsSync(snapshotPath)) {
       const options = { fullPage: true };
 
       // Override threshold if specified via CLI
@@ -1563,20 +1539,18 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
 
       try {
         await expect(page).toHaveScreenshot(snapshotName, options);
-        screenshotStats.checked++;
       } catch (error) {
         const errorMsg = error.message || String(error);
         if (errorMsg.includes('Screenshot') || errorMsg.includes('snapshot')) {
-          // Log mismatch and re-throw to fail the test
-          console.warn(`[Baseline Mismatch] ${path}`);
-          throw error;
-        } else {
+          console.warn(
+            isCaptureMode
+              ? `[Baseline Capture Failed] ${path}: ${errorMsg}`
+              : `[Baseline Mismatch] ${path}`,
+          );
           throw error;
         }
+        throw error;
       }
-    } else {
-      // Snapshot doesn't exist and not in capture mode - skip silently
-      screenshotStats.skipped++;
     }
   }
 
