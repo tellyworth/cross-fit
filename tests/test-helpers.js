@@ -315,9 +315,8 @@ export async function testWordPressPage(page, wpInstance, path, options = {}) {
     const snapshotPath = getSnapshotPath(snapshotName);
     const isCaptureMode = process.env.CAPTURE === '1';
 
-    // In capture mode, always attempt to create/update snapshots.
-    // In normal mode, only compare if the snapshot file already exists.
-    if (isCaptureMode || existsSync(snapshotPath)) {
+    // Only compare if snapshot exists OR if in capture mode (to create it)
+    if (existsSync(snapshotPath) || isCaptureMode) {
       const options = { fullPage: true };
 
       // Override threshold if specified via CLI
@@ -330,14 +329,12 @@ export async function testWordPressPage(page, wpInstance, path, options = {}) {
       } catch (error) {
         const errorMsg = error.message || String(error);
         if (errorMsg.includes('Screenshot') || errorMsg.includes('snapshot')) {
-          console.warn(
-            isCaptureMode
-              ? `[Baseline Capture Failed] ${path}: ${errorMsg}`
-              : `[Baseline Mismatch] ${path}`,
-          );
+          // Log mismatch and re-throw to fail the test
+          console.warn(`[Baseline Mismatch] ${path}`);
+          throw error;
+        } else {
           throw error;
         }
-        throw error;
       }
     }
   }
@@ -1527,16 +1524,8 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
     const snapshotPath = getSnapshotPath(snapshotName);
     const isCaptureMode = process.env.CAPTURE === '1';
 
-    // In capture mode, always attempt to create/update snapshots.
-    // In normal mode, only compare if the snapshot file already exists.
-    if (isCaptureMode || existsSync(snapshotPath)) {
-      // Wait for network to be idle before taking screenshot (ensures fonts/resources are loaded)
-      try {
-        await page.waitForLoadState('networkidle', { timeout: 10000 });
-      } catch (e) {
-        // If networkidle times out, continue anyway - page may be stable enough
-      }
-
+    // Only compare if snapshot exists OR if in capture mode (to create it)
+    if (existsSync(snapshotPath) || isCaptureMode) {
       const options = { fullPage: true };
 
       // Override threshold if specified via CLI
@@ -1549,14 +1538,12 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
       } catch (error) {
         const errorMsg = error.message || String(error);
         if (errorMsg.includes('Screenshot') || errorMsg.includes('snapshot')) {
-          console.warn(
-            isCaptureMode
-              ? `[Baseline Capture Failed] ${path}: ${errorMsg}`
-              : `[Baseline Mismatch] ${path}`,
-          );
+          // Log mismatch and re-throw to fail the test
+          console.warn(`[Baseline Mismatch] ${path}`);
+          throw error;
+        } else {
           throw error;
         }
-        throw error;
       }
     }
   }
