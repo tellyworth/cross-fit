@@ -1,5 +1,11 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
+import { rmSync, existsSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // Simple argparse: supports --key=value and --key value forms
 function parseArgs(argv) {
@@ -75,14 +81,94 @@ async function main() {
     // Do not forward --debug to Playwright
   }
 
+  // Handle CAPTURE flag - map to Playwright's --update-snapshots
+  // Check both options (--capture=value) and passthrough (--capture as flag) BEFORE filtering
+  const hasCaptureFlag = options.capture || passthrough.includes('--capture') || process.env.CAPTURE === '1';
+
+  // Handle CLEAR_SNAPSHOTS flag - delete test-snapshots directory and skip screenshot comparison
+  // Check for flag in multiple formats: --clear-snapshots, clear-snapshots=1, or in passthrough
+  const hasClearSnapshotsFlag = options['clear-snapshots'] || passthrough.includes('--clear-snapshots') ||
+                                 options.clearSnapshots || process.env.CLEAR_SNAPSHOTS === '1';
+  if (hasClearSnapshotsFlag) {
+    const projectRoot = join(__dirname, '..');
+    const snapshotsDir = join(projectRoot, 'test-snapshots');
+    if (existsSync(snapshotsDir)) {
+      try {
+        rmSync(snapshotsDir, { recursive: true, force: true });
+        console.log(`[Baseline] Cleared snapshots directory: ${snapshotsDir}`);
+      } catch (error) {
+        console.warn(`[Baseline] Failed to clear snapshots directory: ${error.message}`);
+      }
+    }
+    // Skip screenshot comparison after clearing
+    env.SKIP_SNAPSHOTS = '1';
+  }
+
+  // Handle SKIP_SNAPSHOTS flag - skip screenshot comparison entirely
+  const hasSkipSnapshotsFlag = options['skip-snapshots'] || passthrough.includes('--skip-snapshots') ||
+                                options.skipSnapshots || process.env.SKIP_SNAPSHOTS === '1';
+  if (hasSkipSnapshotsFlag) {
+    env.SKIP_SNAPSHOTS = '1';
+  }
+
+  // Handle SCREENSHOT_THRESHOLD - set pixel difference threshold (0-1)
+  // Default is 0.02 (2%) as set in playwright.config.js
+  // Only set env var if explicitly provided via CLI, otherwise use config default
+  const screenshotThreshold = options['screenshot-threshold'] || options.screenshotThreshold ||
+                              options.threshold || process.env.SCREENSHOT_THRESHOLD;
+
+  if (screenshotThreshold) {
+    const thresholdValue = parseFloat(screenshotThreshold);
+    if (isNaN(thresholdValue) || thresholdValue < 0 || thresholdValue > 1) {
+      console.warn(`[Baseline] Invalid screenshot threshold: ${screenshotThreshold}. Must be between 0 and 1. Using default 0.02.`);
+    } else {
+      env.SCREENSHOT_THRESHOLD = thresholdValue.toString();
+    }
+  }
+  // If not provided, don't set env var - let playwright.config.js default (0.02) be used
+
+  // Print single consolidated message about snapshot mode
+  const thresholdMsg = screenshotThreshold ? ` (threshold: ${(parseFloat(screenshotThreshold) * 100).toFixed(1)}%)` : '';
+  if (hasClearSnapshotsFlag) {
+    console.log('[Baseline] Cleared snapshots, screenshot comparison disabled');
+  } else if (hasSkipSnapshotsFlag) {
+    console.log('[Baseline] Screenshot comparison disabled');
+  } else if (hasCaptureFlag) {
+    console.log(`[Baseline] Creating/updating snapshots${thresholdMsg}`);
+  } else {
+    // Only show comparison message if snapshots directory exists
+    const projectRoot = join(__dirname, '..');
+    const snapshotsDir = join(projectRoot, 'test-snapshots');
+    if (existsSync(snapshotsDir)) {
+      console.log(`[Baseline] Comparing against snapshots${thresholdMsg}`);
+    }
+    // If no snapshots exist, silently skip (no message needed)
+  }
+
   // Forward all other options to Playwright (e.g., --grep, --grep-invert, etc.)
-  const forwardedArgs = [...passthrough];
+  // Filter out snapshot-related flags from passthrough
+  const forwardedArgs = passthrough.filter(arg =>
+    arg !== '--capture' &&
+    arg !== '--clear-snapshots' &&
+    arg !== '--skip-snapshots'
+  );
+
+  if (hasCaptureFlag) {
+    // Set CAPTURE env var so test helpers know we're in capture mode
+    env.CAPTURE = '1';
+    // Map --capture to Playwright's --update-snapshots flag
+    forwardedArgs.push('--update-snapshots');
+    console.log('[Baseline] Capture mode enabled - will update screenshot snapshots');
+  }
   for (const [key, value] of Object.entries(options)) {
       // Skip custom options that we handle ourselves
       if (key !== 'blueprint' && key !== 'debugLog' && key !== 'debug-log' &&
           key !== 'import' && key !== 'theme' && key !== 'plugin' &&
           key !== 'wpversion' && key !== 'wp-version' &&
-          key !== 'full' && key !== 'fullMode' && key !== 'debug') {
+          key !== 'full' && key !== 'fullMode' && key !== 'debug' &&
+          key !== 'capture' && key !== 'clear-snapshots' && key !== 'clearSnapshots' &&
+          key !== 'skip-snapshots' && key !== 'skipSnapshots' &&
+          key !== 'screenshot-threshold' && key !== 'screenshotThreshold' && key !== 'threshold') {
         forwardedArgs.push(`--${key}=${value}`);
       }
   }

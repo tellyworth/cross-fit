@@ -1,10 +1,107 @@
 import { expect } from '@playwright/test';
 import { readFileSync, existsSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import os from 'os';
+import playwrightConfig from '../playwright.config.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Get screenshot configuration from playwright.config.js
+const screenshotConfig = playwrightConfig.default?.screenshot || {};
+const SCREENSHOT_NETWORK_IDLE_TIMEOUT = screenshotConfig.networkIdleTimeout ?? 2000;
+const SCREENSHOT_STABILIZATION_DELAY = screenshotConfig.stabilizationDelay ?? 500;
+const SCREENSHOT_SKIP_PATHS = screenshotConfig.skipPaths || [];
 
 /**
  * Reusable test helpers for WordPress E2E testing
  * Following Playwright's recommended patterns
  */
+
+/**
+ * Generate a safe snapshot name from a path
+ * Converts /wp-admin/options-general.php to wp-admin-options-general-php.png
+ * Handles query parameters by encoding them
+ * Note: Playwright automatically adds platform suffix (e.g., -darwin), so we just need .png extension
+ */
+function pathToSnapshotName(path) {
+  // Split path and query
+  const [pathPart, queryPart] = path.split('?');
+
+  // Remove leading/trailing slashes and replace remaining slashes with dashes
+  let name = pathPart.replace(/^\/+|\/+$/g, '').replace(/\//g, '-') || 'index';
+
+  // Remove file extensions for cleaner names (e.g., .php, .html)
+  name = name.replace(/\.(php|html)$/, '');
+
+  // If there's a query string, encode it and append
+  if (queryPart) {
+    // Replace special chars in query with safe equivalents
+    const safeQuery = queryPart.replace(/[=&]/g, '-').replace(/[^a-zA-Z0-9-]/g, '_');
+    name = `${name}__${safeQuery}`;
+  }
+
+  // Playwright requires .png extension (it will add platform suffix automatically)
+  return `${name}.png`;
+}
+
+/**
+ * Get the full path to a snapshot file
+ * Playwright uses snapshotPathTemplate: 'test-snapshots/{arg}{ext}'
+ * Playwright automatically adds platform suffix (e.g., -darwin, -win32, -linux) to snapshot names
+ * So we need to check for the platform-specific filename
+ */
+function getSnapshotPath(snapshotName) {
+  // Remove .png extension if present
+  const baseName = snapshotName.replace(/\.png$/, '');
+  // Get platform suffix (Playwright uses darwin, win32, or linux)
+  const platform = os.platform() === 'darwin' ? 'darwin' : os.platform() === 'win32' ? 'win32' : 'linux';
+  // Construct the platform-specific filename
+  const platformSpecificName = `${baseName}-${platform}.png`;
+  return join(__dirname, '..', 'test-snapshots', platformSpecificName);
+}
+
+/**
+ * Shared screenshot comparison logic for both public and admin pages
+ */
+async function compareScreenshot(page, path, snapshotName, options = {}) {
+  const snapshotPath = getSnapshotPath(snapshotName);
+  const isCaptureMode = process.env.CAPTURE === '1';
+
+  // Only compare if snapshot exists OR if in capture mode (to create it)
+  if (!existsSync(snapshotPath) && !isCaptureMode) {
+    return; // No snapshot exists and not capturing - skip silently
+  }
+
+  // Wait for page to stabilize before taking screenshot (admin pages only)
+  if (options.waitForStabilization) {
+    try {
+      await page.waitForLoadState('networkidle', { timeout: SCREENSHOT_NETWORK_IDLE_TIMEOUT });
+    } catch (e) {
+      // If networkidle times out quickly, continue anyway - page may be stable enough
+    }
+    await page.waitForTimeout(SCREENSHOT_STABILIZATION_DELAY);
+  }
+
+  const screenshotOptions = { fullPage: true };
+
+  // Override threshold if specified via CLI
+  if (process.env.SCREENSHOT_THRESHOLD) {
+    screenshotOptions.maxDiffPixelRatio = parseFloat(process.env.SCREENSHOT_THRESHOLD);
+  }
+
+  try {
+    await expect(page).toHaveScreenshot(snapshotName, screenshotOptions);
+  } catch (error) {
+    const errorMsg = error.message || String(error);
+    if (errorMsg.includes('Screenshot') || errorMsg.includes('snapshot')) {
+      // Log mismatch and re-throw to fail the test
+      console.warn(`[Baseline Mismatch] ${path}`);
+    }
+    throw error;
+  }
+}
 
 /**
  * Normalize URL - handles full URLs or relative paths
@@ -267,6 +364,13 @@ export async function testWordPressPage(page, wpInstance, path, options = {}) {
   // Remove event listeners to prevent memory leaks
   page.off('console', consoleListener);
   page.off('pageerror', pageErrorListener);
+
+  // Visual baseline comparison using Playwright's built-in screenshot comparison
+  // Skip screenshot comparison if PHP errors are allowed (they change page layout)
+  if (process.env.SKIP_SNAPSHOTS !== '1' && !allowPHPErrors) {
+    const snapshotName = pathToSnapshotName(path);
+    await compareScreenshot(page, path, snapshotName, { waitForStabilization: false });
+  }
 
   // Return test results for additional assertions if needed
   return {
@@ -1233,9 +1337,10 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
 
   // Detect PHP errors in page content (when WP_DEBUG_DISPLAY is enabled)
   let phpErrors = [];
+  let pageContent = null;
   try {
     if (!page.isClosed()) {
-      const pageContent = await page.content();
+      pageContent = await page.content();
       phpErrors = detectPHPErrors(pageContent);
     }
   } catch (err) {
@@ -1246,7 +1351,7 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
   // Check for admin-specific elements
   const adminCheck = await page.evaluate(() => {
     return {
-      hasAdminBody: document.body.classList.contains('wp-admin'),
+      hasAdminBody: document.body?.classList?.contains('wp-admin') || false,
       hasAdminBar: !!document.querySelector('#wpadminbar'),
       hasAdminMenu: !!document.querySelector('#adminmenumain'),
       hasWpBodyContent: !!document.querySelector('#wpbody-content'),
@@ -1445,6 +1550,25 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
   // Remove event listeners to prevent memory leaks
   page.off('console', consoleListener);
   page.off('pageerror', pageErrorListener);
+
+  // Visual baseline comparison using Playwright's built-in screenshot comparison
+  if (pageContent && !page.isClosed() && process.env.SKIP_SNAPSHOTS !== '1') {
+    const snapshotName = pathToSnapshotName(path);
+    // Check if this path should be skipped before calling compareScreenshot
+    if (SCREENSHOT_SKIP_PATHS.some(skipPath => path.includes(skipPath))) {
+      // Skip screenshot for this page - return early
+      return {
+        response,
+        adminCheck,
+        isAuthenticated: !isLoginPage,
+        phpErrors,
+        consoleErrors,
+        pageErrors,
+        dashboardNotices,
+      };
+    }
+    await compareScreenshot(page, path, snapshotName, { waitForStabilization: true });
+  }
 
   return {
     response,

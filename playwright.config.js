@@ -14,6 +14,8 @@ const LOCAL_WORKERS = process.env.PW_WORKERS
 
 export default defineConfig({
   testDir: './tests',
+  // Store all screenshots in a central test-snapshots directory
+  snapshotPathTemplate: 'test-snapshots/{arg}{ext}',
   fullyParallel: true, // Run tests in parallel with multiple workers
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
@@ -43,7 +45,25 @@ export default defineConfig({
   // Timeout settings
   timeout: 20000, // 20 seconds per test (reduced from 30s for faster feedback)
   expect: {
-    timeout: 3000, // 3 seconds for assertions (reduced from 5s)
+    // Allow more time for complex admin pages and font loading in screenshot assertions
+    timeout: 20000, // 20 seconds for assertions (admin pages with heavy JS/fonts may need more time)
+    toHaveScreenshot: {
+      // Default pixel difference ratio (0-1) - can be overridden per-call or via --threshold
+      maxDiffPixelRatio: 0.02, // 2% default
+    },
+  },
+  // Custom screenshot comparison settings
+  // These are used by test-helpers.js for screenshot stabilization
+  screenshot: {
+    // Wait for network to be idle before taking screenshots (ms)
+    networkIdleTimeout: 2000,
+    // Additional wait time for JavaScript-driven layout changes to settle (ms)
+    stabilizationDelay: 500,
+    // Paths to skip screenshot comparison (pages with non-deterministic content)
+    skipPaths: [
+      '/wp-admin/themes.php',        // "Add Theme" button appears/disappears non-deterministically
+      '/wp-admin/site-health.php',   // Content loads dynamically, page height changes
+    ],
   },
 });
 
