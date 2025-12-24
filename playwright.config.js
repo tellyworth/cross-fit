@@ -52,5 +52,18 @@ export default defineConfig({
       maxDiffPixelRatio: 0.02, // 2% default
     },
   },
+  // Custom screenshot comparison settings
+  // These are used by test-helpers.js for screenshot stabilization
+  screenshot: {
+    // Wait for network to be idle before taking screenshots (ms)
+    networkIdleTimeout: 2000,
+    // Additional wait time for JavaScript-driven layout changes to settle (ms)
+    stabilizationDelay: 500,
+    // Paths to skip screenshot comparison (pages with non-deterministic content)
+    skipPaths: [
+      '/wp-admin/themes.php',        // "Add Theme" button appears/disappears non-deterministically
+      '/wp-admin/site-health.php',   // Content loads dynamically, page height changes
+    ],
+  },
 });
 

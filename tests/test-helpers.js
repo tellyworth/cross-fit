@@ -2,9 +2,16 @@ import { expect } from '@playwright/test';
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import playwrightConfig from '../playwright.config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// Get screenshot configuration from playwright.config.js
+const screenshotConfig = playwrightConfig.default?.screenshot || {};
+const SCREENSHOT_NETWORK_IDLE_TIMEOUT = screenshotConfig.networkIdleTimeout ?? 2000;
+const SCREENSHOT_STABILIZATION_DELAY = screenshotConfig.stabilizationDelay ?? 500;
+const SCREENSHOT_SKIP_PATHS = screenshotConfig.skipPaths || [];
 
 /**
  * Reusable test helpers for WordPress E2E testing
@@ -1525,11 +1532,7 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
     const isCaptureMode = process.env.CAPTURE === '1';
 
     // Skip screenshot comparison for pages with non-deterministic content
-    const skipScreenshotPaths = [
-      '/wp-admin/themes.php',        // "Add Theme" button appears/disappears non-deterministically
-      '/wp-admin/site-health.php',   // Content loads dynamically, page height changes
-    ];
-    if (skipScreenshotPaths.some(skipPath => path.includes(skipPath))) {
+    if (SCREENSHOT_SKIP_PATHS.some(skipPath => path.includes(skipPath))) {
       // Skip screenshot for this page
       return {
         response,
@@ -1548,13 +1551,13 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
       // This helps ensure dynamic content (notices, buttons, etc.) has finished loading
       // and layout has stabilized, reducing non-deterministic differences between runs
       try {
-        await page.waitForLoadState('networkidle', { timeout: 2000 });
+        await page.waitForLoadState('networkidle', { timeout: SCREENSHOT_NETWORK_IDLE_TIMEOUT });
       } catch (e) {
         // If networkidle times out quickly, continue anyway - page may be stable enough
       }
 
       // Additional short wait to let any JavaScript-driven layout changes settle
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(SCREENSHOT_STABILIZATION_DELAY);
 
       const options = { fullPage: true };
 
