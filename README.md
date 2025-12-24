@@ -112,9 +112,11 @@ npm test -- --threshold=0.01 # Stricter: only 1% difference allowed
 **How it works:**
 - Screenshots are stored in `test-snapshots/` directory (gitignored)
 - Uses Playwright's built-in screenshot comparison with configurable threshold
-- Default threshold is 2% (`maxDiffPixelRatio: 0.02`) to account for dynamic content (timestamps)
-- Mismatches are logged as warnings but don't fail tests (MVP behavior)
+- Default threshold is 2% (`maxDiffPixelRatio: 0.02`) to account for dynamic content (timestamps, layout shifts)
+- The threshold can be overridden via `--threshold` or `--screenshot-threshold` CLI flags
+- Mismatches fail tests (errors are thrown when visual differences exceed the threshold)
 - Screenshots are captured automatically for all pages tested in `public-pages.spec.js` and `admin-pages.spec.js`
+- Some pages with non-deterministic content (e.g., `/wp-admin/themes.php`, `/wp-admin/site-health.php`) are excluded from screenshot comparison
 
 #### Running All Tests
 

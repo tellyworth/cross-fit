@@ -111,17 +111,21 @@ async function main() {
     env.SKIP_SNAPSHOTS = '1';
   }
 
-  // Handle SCREENSHOT_THRESHOLD - set pixel difference threshold (0-1, default 0.05)
+  // Handle SCREENSHOT_THRESHOLD - set pixel difference threshold (0-1)
+  // Default is 0.02 (2%) as set in playwright.config.js
+  // Only set env var if explicitly provided via CLI, otherwise use config default
   const screenshotThreshold = options['screenshot-threshold'] || options.screenshotThreshold ||
                               options.threshold || process.env.SCREENSHOT_THRESHOLD;
 
-  const thresholdValue = screenshotThreshold ? parseFloat(screenshotThreshold) : 0.05;
-  if (isNaN(thresholdValue) || thresholdValue < 0 || thresholdValue > 1) {
-    console.warn(`[Baseline] Invalid screenshot threshold: ${screenshotThreshold}. Must be between 0 and 1. Using default 0.05.`);
-    env.SCREENSHOT_THRESHOLD = '0.05';
-  } else {
-    env.SCREENSHOT_THRESHOLD = thresholdValue.toString();
+  if (screenshotThreshold) {
+    const thresholdValue = parseFloat(screenshotThreshold);
+    if (isNaN(thresholdValue) || thresholdValue < 0 || thresholdValue > 1) {
+      console.warn(`[Baseline] Invalid screenshot threshold: ${screenshotThreshold}. Must be between 0 and 1. Using default 0.02.`);
+    } else {
+      env.SCREENSHOT_THRESHOLD = thresholdValue.toString();
+    }
   }
+  // If not provided, don't set env var - let playwright.config.js default (0.02) be used
 
   // Print single consolidated message about snapshot mode
   if (hasClearSnapshotsFlag) {
@@ -132,8 +136,14 @@ async function main() {
     const thresholdMsg = screenshotThreshold ? ` (threshold: ${(thresholdValue * 100).toFixed(1)}%)` : '';
     console.log(`[Baseline] Creating/updating snapshots${thresholdMsg}`);
   } else {
-    const thresholdMsg = screenshotThreshold ? ` (threshold: ${(thresholdValue * 100).toFixed(1)}%)` : '';
-    console.log(`[Baseline] Comparing against snapshots${thresholdMsg}`);
+    // Only show comparison message if snapshots directory exists
+    const projectRoot = join(__dirname, '..');
+    const snapshotsDir = join(projectRoot, 'test-snapshots');
+    if (existsSync(snapshotsDir)) {
+      const thresholdMsg = screenshotThreshold ? ` (threshold: ${(thresholdValue * 100).toFixed(1)}%)` : '';
+      console.log(`[Baseline] Comparing against snapshots${thresholdMsg}`);
+    }
+    // If no snapshots exist, silently skip (no message needed)
   }
 
   // Forward all other options to Playwright (e.g., --grep, --grep-invert, etc.)
