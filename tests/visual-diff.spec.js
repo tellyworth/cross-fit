@@ -76,7 +76,6 @@ test.describe('Visual Diff Failure Test', { tag: '@internal' }, () => {
     // exceeds the 2% threshold compared to the committed baseline
     await expect(page).toHaveScreenshot('visual-diff-baseline.png', {
       fullPage: true,
-      maxDiffPixelRatio: 0.02, // 2% threshold
     });
   });
 });
