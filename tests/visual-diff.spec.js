@@ -31,13 +31,16 @@ test.describe('Visual Diff Failure Test', { tag: '@internal' }, () => {
     const platform = os.platform() === 'darwin' ? 'darwin' : os.platform() === 'win32' ? 'win32' : 'linux';
     const snapshotsDir = join(__dirname, 'snapshots');
     const committedSnapshot = join(snapshotsDir, `visual-diff-baseline-${platform}.png`);
-    const expectedSnapshot = join(__dirname, '..', 'test-snapshots', `visual-diff-baseline-${platform}.png`);
+    // Playwright automatically adds platform suffix to snapshot names
+    // When we call toHaveScreenshot('visual-diff-baseline.png'), Playwright looks for
+    // 'visual-diff-baseline-darwin.png' (or -win32.png, -linux.png)
+    const testSnapshotsDir = join(__dirname, '..', 'test-snapshots');
+    const expectedSnapshot = join(testSnapshotsDir, `visual-diff-baseline-${platform}.png`);
 
     // Ensure directories exist
     if (!existsSync(snapshotsDir)) {
       mkdirSync(snapshotsDir, { recursive: true });
     }
-    const testSnapshotsDir = join(__dirname, '..', 'test-snapshots');
     if (!existsSync(testSnapshotsDir)) {
       mkdirSync(testSnapshotsDir, { recursive: true });
     }
@@ -53,7 +56,7 @@ test.describe('Visual Diff Failure Test', { tag: '@internal' }, () => {
       const fs = await import('fs/promises');
       await fs.writeFile(committedSnapshot, screenshot);
 
-      // Also save to expected location for Playwright
+      // Also save to expected location for Playwright (with platform suffix)
       await fs.writeFile(expectedSnapshot, screenshot);
 
       test.skip(true, 'Baseline snapshot created. Run test again to verify visual diff failure.');
@@ -61,6 +64,9 @@ test.describe('Visual Diff Failure Test', { tag: '@internal' }, () => {
     }
 
     // Copy committed snapshot to expected location
+    // Playwright automatically adds platform suffix when resolving snapshot names
+    // When we call toHaveScreenshot('visual-diff-baseline.png'), Playwright looks for
+    // 'visual-diff-baseline-darwin.png' (or -win32.png, -linux.png) based on the platform
     copyFileSync(committedSnapshot, expectedSnapshot);
 
     // Load homepage with visual diff trigger - this should fail comparison

@@ -358,7 +358,8 @@ export async function testWordPressPage(page, wpInstance, path, options = {}) {
   page.off('pageerror', pageErrorListener);
 
   // Visual baseline comparison using Playwright's built-in screenshot comparison
-  if (process.env.SKIP_SNAPSHOTS !== '1') {
+  // Skip screenshot comparison if PHP errors are allowed (they change page layout)
+  if (process.env.SKIP_SNAPSHOTS !== '1' && !allowPHPErrors) {
     const snapshotName = pathToSnapshotName(path);
     await compareScreenshot(page, path, snapshotName, { waitForStabilization: false });
   }
