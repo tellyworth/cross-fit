@@ -2,6 +2,7 @@ import { expect } from '@playwright/test';
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import os from 'os';
 import playwrightConfig from '../playwright.config.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -48,10 +49,17 @@ function pathToSnapshotName(path) {
 /**
  * Get the full path to a snapshot file
  * Playwright uses snapshotPathTemplate: 'test-snapshots/{arg}{ext}'
- * We store snapshots directly as '{arg}.png' in the 'test-snapshots' directory.
+ * Playwright automatically adds platform suffix (e.g., -darwin, -win32, -linux) to snapshot names
+ * So we need to check for the platform-specific filename
  */
 function getSnapshotPath(snapshotName) {
-  return join(__dirname, '..', 'test-snapshots', snapshotName);
+  // Remove .png extension if present
+  const baseName = snapshotName.replace(/\.png$/, '');
+  // Get platform suffix (Playwright uses darwin, win32, or linux)
+  const platform = os.platform() === 'darwin' ? 'darwin' : os.platform() === 'win32' ? 'win32' : 'linux';
+  // Construct the platform-specific filename
+  const platformSpecificName = `${baseName}-${platform}.png`;
+  return join(__dirname, '..', 'test-snapshots', platformSpecificName);
 }
 
 /**
