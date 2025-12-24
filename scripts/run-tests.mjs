@@ -86,13 +86,19 @@ async function main() {
   const hasCaptureFlag = options.capture || passthrough.includes('--capture') || process.env.CAPTURE === '1';
 
   // Handle CLEAR_SNAPSHOTS flag - delete test-snapshots directory and skip screenshot comparison
+  // Check for flag in multiple formats: --clear-snapshots, clear-snapshots=1, or in passthrough
   const hasClearSnapshotsFlag = options['clear-snapshots'] || passthrough.includes('--clear-snapshots') ||
                                  options.clearSnapshots || process.env.CLEAR_SNAPSHOTS === '1';
   if (hasClearSnapshotsFlag) {
     const projectRoot = join(__dirname, '..');
     const snapshotsDir = join(projectRoot, 'test-snapshots');
     if (existsSync(snapshotsDir)) {
-      rmSync(snapshotsDir, { recursive: true, force: true });
+      try {
+        rmSync(snapshotsDir, { recursive: true, force: true });
+        console.log(`[Baseline] Cleared snapshots directory: ${snapshotsDir}`);
+      } catch (error) {
+        console.warn(`[Baseline] Failed to clear snapshots directory: ${error.message}`);
+      }
     }
     // Skip screenshot comparison after clearing
     env.SKIP_SNAPSHOTS = '1';

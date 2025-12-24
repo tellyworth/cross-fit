@@ -81,6 +81,29 @@ async function globalTeardown(wpInstance) {
   delete process.env.WP_PLAYGROUND_URL;
   delete process.env.WP_PLAYGROUND_DEBUG_LOG;
   delete process.env.WP_DEBUG_LOG_LINES;
+
+  // Clean up empty test-snapshots directory (similar to how test-results is handled)
+  // Only remove if it's empty to avoid accidental deletion of snapshots
+  if (process.env.SKIP_SNAPSHOTS !== '1') {
+    try {
+      const { existsSync, readdirSync, rmdirSync } = await import('fs');
+      const { join, dirname } = await import('path');
+      const { fileURLToPath } = await import('url');
+
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = dirname(__filename);
+      const snapshotsDir = join(__dirname, '..', 'test-snapshots');
+
+      if (existsSync(snapshotsDir)) {
+        const files = readdirSync(snapshotsDir);
+        if (files.length === 0) {
+          rmdirSync(snapshotsDir);
+        }
+      }
+    } catch (error) {
+      // Silently fail - cleanup is not critical
+    }
+  }
 }
 
 export default globalTeardown;
