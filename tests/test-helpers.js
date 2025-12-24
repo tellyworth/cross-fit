@@ -1544,6 +1544,18 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
 
     // Only compare if snapshot exists OR if in capture mode (to create it)
     if (existsSync(snapshotPath) || isCaptureMode) {
+      // Wait for page to stabilize before taking screenshot
+      // This helps ensure dynamic content (notices, buttons, etc.) has finished loading
+      // and layout has stabilized, reducing non-deterministic differences between runs
+      try {
+        await page.waitForLoadState('networkidle', { timeout: 2000 });
+      } catch (e) {
+        // If networkidle times out quickly, continue anyway - page may be stable enough
+      }
+
+      // Additional short wait to let any JavaScript-driven layout changes settle
+      await page.waitForTimeout(500);
+
       const options = { fullPage: true };
 
       // Override threshold if specified via CLI
