@@ -42,7 +42,7 @@ function big_mistake_trigger_errors() {
 
       case 'fatal':
         // Trigger a real fatal error. Breaking the page is intended.
-        non_existent_function();
+        non_existent_function(); // phpcs:ignore
         break;
 
       case 'deprecated':
@@ -93,11 +93,13 @@ add_action('init', 'big_mistake_trigger_errors', 1);
 function big_mistake_trigger_visual_diff() {
   $visual_diff = isset($_GET['trigger_visual_diff']) || isset($_SERVER['HTTP_X_TRIGGER_VISUAL_DIFF']);
   if ($visual_diff) {
-    add_action('wp_footer', function() {
+    $inject_visual_diff = function() {
       // Inject a small but visible element that will cause a visual diff
       // This creates a colored box that should exceed 2% threshold
       echo '<div style="position: fixed; top: 10px; right: 10px; width: 100px; height: 100px; background: #ff0000; z-index: 99999; border: 2px solid #000;"></div>';
-    }, 999);
+    };
+    add_action('wp_footer', $inject_visual_diff, 999);
+    add_action('admin_footer', $inject_visual_diff, 999);
   }
 }
 
