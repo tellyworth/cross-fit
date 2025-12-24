@@ -128,19 +128,18 @@ async function main() {
   // If not provided, don't set env var - let playwright.config.js default (0.02) be used
 
   // Print single consolidated message about snapshot mode
+  const thresholdMsg = screenshotThreshold ? ` (threshold: ${(parseFloat(screenshotThreshold) * 100).toFixed(1)}%)` : '';
   if (hasClearSnapshotsFlag) {
     console.log('[Baseline] Cleared snapshots, screenshot comparison disabled');
   } else if (hasSkipSnapshotsFlag) {
     console.log('[Baseline] Screenshot comparison disabled');
   } else if (hasCaptureFlag) {
-    const thresholdMsg = screenshotThreshold ? ` (threshold: ${(thresholdValue * 100).toFixed(1)}%)` : '';
     console.log(`[Baseline] Creating/updating snapshots${thresholdMsg}`);
   } else {
     // Only show comparison message if snapshots directory exists
     const projectRoot = join(__dirname, '..');
     const snapshotsDir = join(projectRoot, 'test-snapshots');
     if (existsSync(snapshotsDir)) {
-      const thresholdMsg = screenshotThreshold ? ` (threshold: ${(thresholdValue * 100).toFixed(1)}%)` : '';
       console.log(`[Baseline] Comparing against snapshots${thresholdMsg}`);
     }
     // If no snapshots exist, silently skip (no message needed)

@@ -55,6 +55,47 @@ function getSnapshotPath(snapshotName) {
 }
 
 /**
+ * Shared screenshot comparison logic for both public and admin pages
+ */
+async function compareScreenshot(page, path, snapshotName, options = {}) {
+  const snapshotPath = getSnapshotPath(snapshotName);
+  const isCaptureMode = process.env.CAPTURE === '1';
+
+  // Only compare if snapshot exists OR if in capture mode (to create it)
+  if (!existsSync(snapshotPath) && !isCaptureMode) {
+    return; // No snapshot exists and not capturing - skip silently
+  }
+
+  // Wait for page to stabilize before taking screenshot (admin pages only)
+  if (options.waitForStabilization) {
+    try {
+      await page.waitForLoadState('networkidle', { timeout: SCREENSHOT_NETWORK_IDLE_TIMEOUT });
+    } catch (e) {
+      // If networkidle times out quickly, continue anyway - page may be stable enough
+    }
+    await page.waitForTimeout(SCREENSHOT_STABILIZATION_DELAY);
+  }
+
+  const screenshotOptions = { fullPage: true };
+
+  // Override threshold if specified via CLI
+  if (process.env.SCREENSHOT_THRESHOLD) {
+    screenshotOptions.maxDiffPixelRatio = parseFloat(process.env.SCREENSHOT_THRESHOLD);
+  }
+
+  try {
+    await expect(page).toHaveScreenshot(snapshotName, screenshotOptions);
+  } catch (error) {
+    const errorMsg = error.message || String(error);
+    if (errorMsg.includes('Screenshot') || errorMsg.includes('snapshot')) {
+      // Log mismatch and re-throw to fail the test
+      console.warn(`[Baseline Mismatch] ${path}`);
+    }
+    throw error;
+  }
+}
+
+/**
  * Normalize URL - handles full URLs or relative paths
  * @param {string} baseUrl - Base URL from wpInstance
  * @param {string} path - Relative path (e.g., '/wp-admin/') or full URL
@@ -319,31 +360,7 @@ export async function testWordPressPage(page, wpInstance, path, options = {}) {
   // Visual baseline comparison using Playwright's built-in screenshot comparison
   if (process.env.SKIP_SNAPSHOTS !== '1') {
     const snapshotName = pathToSnapshotName(path);
-    const snapshotPath = getSnapshotPath(snapshotName);
-    const isCaptureMode = process.env.CAPTURE === '1';
-
-    // Only compare if snapshot exists OR if in capture mode (to create it)
-    if (existsSync(snapshotPath) || isCaptureMode) {
-      const options = { fullPage: true };
-
-      // Override threshold if specified via CLI
-      if (process.env.SCREENSHOT_THRESHOLD) {
-        options.maxDiffPixelRatio = parseFloat(process.env.SCREENSHOT_THRESHOLD);
-      }
-
-      try {
-        await expect(page).toHaveScreenshot(snapshotName, options);
-      } catch (error) {
-        const errorMsg = error.message || String(error);
-        if (errorMsg.includes('Screenshot') || errorMsg.includes('snapshot')) {
-          // Log mismatch and re-throw to fail the test
-          console.warn(`[Baseline Mismatch] ${path}`);
-          throw error;
-        } else {
-          throw error;
-        }
-      }
-    }
+    await compareScreenshot(page, path, snapshotName, { waitForStabilization: false });
   }
 
   // Return test results for additional assertions if needed
@@ -1528,12 +1545,9 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
   // Visual baseline comparison using Playwright's built-in screenshot comparison
   if (pageContent && !page.isClosed() && process.env.SKIP_SNAPSHOTS !== '1') {
     const snapshotName = pathToSnapshotName(path);
-    const snapshotPath = getSnapshotPath(snapshotName);
-    const isCaptureMode = process.env.CAPTURE === '1';
-
-    // Skip screenshot comparison for pages with non-deterministic content
+    // Check if this path should be skipped before calling compareScreenshot
     if (SCREENSHOT_SKIP_PATHS.some(skipPath => path.includes(skipPath))) {
-      // Skip screenshot for this page
+      // Skip screenshot for this page - return early
       return {
         response,
         adminCheck,
@@ -1544,41 +1558,7 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
         dashboardNotices,
       };
     }
-
-    // Only compare if snapshot exists OR if in capture mode (to create it)
-    if (existsSync(snapshotPath) || isCaptureMode) {
-      // Wait for page to stabilize before taking screenshot
-      // This helps ensure dynamic content (notices, buttons, etc.) has finished loading
-      // and layout has stabilized, reducing non-deterministic differences between runs
-      try {
-        await page.waitForLoadState('networkidle', { timeout: SCREENSHOT_NETWORK_IDLE_TIMEOUT });
-      } catch (e) {
-        // If networkidle times out quickly, continue anyway - page may be stable enough
-      }
-
-      // Additional short wait to let any JavaScript-driven layout changes settle
-      await page.waitForTimeout(SCREENSHOT_STABILIZATION_DELAY);
-
-      const options = { fullPage: true };
-
-      // Override threshold if specified via CLI
-      if (process.env.SCREENSHOT_THRESHOLD) {
-        options.maxDiffPixelRatio = parseFloat(process.env.SCREENSHOT_THRESHOLD);
-      }
-
-      try {
-        await expect(page).toHaveScreenshot(snapshotName, options);
-      } catch (error) {
-        const errorMsg = error.message || String(error);
-        if (errorMsg.includes('Screenshot') || errorMsg.includes('snapshot')) {
-          // Log mismatch and re-throw to fail the test
-          console.warn(`[Baseline Mismatch] ${path}`);
-          throw error;
-        } else {
-          throw error;
-        }
-      }
-    }
+    await compareScreenshot(page, path, snapshotName, { waitForStabilization: true });
   }
 
   return {
