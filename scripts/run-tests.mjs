@@ -39,6 +39,12 @@ async function main() {
   // Map known options to env vars and strip from passthrough
   const env = { ...process.env };
 
+  // Check for flag-style options in passthrough (e.g., --upgrade-all without value)
+  if (passthrough.includes('--upgrade-all')) {
+    env.WP_UPGRADE_ALL = '1';
+    // Remove from passthrough so it doesn't get forwarded to Playwright
+  }
+
   if (options.blueprint) {
     env.WP_BLUEPRINT = options.blueprint;
     // Do not forward --blueprint to Playwright
@@ -72,6 +78,11 @@ async function main() {
   if (options['site-health'] || options.siteHealth) {
     env.WP_SITE_HEALTH = options['site-health'] || options.siteHealth;
     // Do not forward --site-health to Playwright
+  }
+
+  if (options['upgrade-all'] || options.upgradeAll) {
+    env.WP_UPGRADE_ALL = '1';
+    // Do not forward --upgrade-all to Playwright
   }
 
   // Handle FULL_MODE flag
@@ -151,11 +162,12 @@ async function main() {
   }
 
   // Forward all other options to Playwright (e.g., --grep, --grep-invert, etc.)
-  // Filter out snapshot-related flags from passthrough
+  // Filter out snapshot-related flags and upgrade-all from passthrough
   const forwardedArgs = passthrough.filter(arg =>
     arg !== '--capture' &&
     arg !== '--clear-snapshots' &&
-    arg !== '--skip-snapshots'
+    arg !== '--skip-snapshots' &&
+    arg !== '--upgrade-all'
   );
 
   if (hasCaptureFlag) {
@@ -171,6 +183,7 @@ async function main() {
           key !== 'import' && key !== 'theme' && key !== 'plugin' &&
           key !== 'wpversion' && key !== 'wp-version' &&
           key !== 'site-health' && key !== 'siteHealth' &&
+          key !== 'upgrade-all' && key !== 'upgradeAll' &&
           key !== 'full' && key !== 'fullMode' && key !== 'debug' &&
           key !== 'capture' && key !== 'clear-snapshots' && key !== 'clearSnapshots' &&
           key !== 'skip-snapshots' && key !== 'skipSnapshots' &&

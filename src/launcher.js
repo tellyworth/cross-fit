@@ -395,6 +395,7 @@ export async function launchWordPress() {
   try {
     // Parse site health file if provided
     const siteHealthPath = process.env.WP_SITE_HEALTH;
+    const upgradeAll = process.env.WP_UPGRADE_ALL === '1';
     let siteHealthData = null;
     if (siteHealthPath) {
       siteHealthData = parseSiteHealthFile(siteHealthPath);
@@ -402,15 +403,28 @@ export async function launchWordPress() {
         console.log(`✓ Parsed site health data from ${siteHealthPath}`);
         console.log(`  - Plugins found: ${siteHealthData.plugins.length}`);
 
+        if (upgradeAll) {
+          console.log(`  - Upgrade-all mode: using latest versions`);
+        }
+
         // Override environment variables with site health data
         if (siteHealthData.wpVersion && !process.env.WP_WP_VERSION) {
-          process.env.WP_WP_VERSION = siteHealthData.wpVersion;
+          // Strip version if upgrade-all is enabled (use 'latest')
+          process.env.WP_WP_VERSION = upgradeAll ? 'latest' : siteHealthData.wpVersion;
         }
         if (siteHealthData.theme && !process.env.WP_THEME) {
-          process.env.WP_THEME = siteHealthData.theme;
+          // Strip version from theme if upgrade-all is enabled
+          const themeSpec = siteHealthData.theme.includes('@')
+            ? (upgradeAll ? siteHealthData.theme.split('@')[0] : siteHealthData.theme)
+            : siteHealthData.theme;
+          process.env.WP_THEME = themeSpec;
         }
         if (siteHealthData.plugins.length > 0 && !process.env.WP_PLUGINS) {
-          process.env.WP_PLUGINS = siteHealthData.plugins.join(',');
+          // Strip versions from plugins if upgrade-all is enabled
+          const pluginsSpec = upgradeAll
+            ? siteHealthData.plugins.map(p => p.includes('@') ? p.split('@')[0] : p)
+            : siteHealthData.plugins;
+          process.env.WP_PLUGINS = pluginsSpec.join(',');
           console.log(`  - Set WP_PLUGINS: ${process.env.WP_PLUGINS}`);
         }
       }
@@ -505,7 +519,13 @@ file_put_contents($log_path, $header, FILE_APPEND | LOCK_EX);
     const wpVersion = process.env.WP_WP_VERSION || 'latest';
 
     // Get PHP version from site health data or default to '8.3'
-    const phpVersion = (siteHealthData && siteHealthData.phpVersion) || '8.3';
+    // If upgrade-all is enabled, use 'latest' for PHP version
+    let phpVersion = '8.3';
+    if (upgradeAll) {
+      phpVersion = 'latest';
+    } else if (siteHealthData && siteHealthData.phpVersion) {
+      phpVersion = siteHealthData.phpVersion;
+    }
 
     // Mount our temp directory to /wordpress before installation
     // This ensures WordPress files (including debug.log) are stored in our known directory
@@ -533,17 +553,25 @@ file_put_contents($log_path, $header, FILE_APPEND | LOCK_EX);
     }
 
     // Log PHP version
-    if (siteHealthData && siteHealthData.phpVersion) {
+    if (upgradeAll) {
+      console.log(`✓ Will use PHP version: latest (upgrade-all mode)`);
+    } else if (siteHealthData && siteHealthData.phpVersion) {
       console.log(`✓ Will use PHP version: ${siteHealthData.phpVersion}`);
     }
 
     // Log site health configuration
     if (siteHealthData) {
       if (siteHealthData.theme) {
-        console.log(`✓ Will install and activate theme from site health: ${siteHealthData.theme}`);
+        const themeDisplay = upgradeAll && siteHealthData.theme.includes('@')
+          ? `${siteHealthData.theme.split('@')[0]} (latest, upgrade-all)`
+          : siteHealthData.theme;
+        console.log(`✓ Will install and activate theme from site health: ${themeDisplay}`);
       }
       if (siteHealthData.plugins.length > 0) {
-        console.log(`✓ Will install and activate plugins from site health: ${siteHealthData.plugins.join(', ')}`);
+        const pluginsDisplay = upgradeAll
+          ? siteHealthData.plugins.map(p => p.includes('@') ? `${p.split('@')[0]} (latest)` : p).join(', ')
+          : siteHealthData.plugins.join(', ');
+        console.log(`✓ Will install and activate plugins from site health: ${pluginsDisplay}`);
       }
       if (Object.keys(siteHealthData.options).length > 0) {
         console.log(`✓ Will set options from site health: ${Object.keys(siteHealthData.options).join(', ')}`);
