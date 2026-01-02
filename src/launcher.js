@@ -4,6 +4,168 @@ import { fileURLToPath } from 'url';
 import { dirname, join, resolve, basename } from 'path';
 import { tmpdir } from 'os';
 
+/**
+ * Parse WordPress Site Health data from a text file
+ * @param {string} filePath - Path to the site health text file
+ * @returns {Object|null} Parsed site health data or null if file cannot be read
+ */
+function parseSiteHealthFile(filePath) {
+  try {
+    // Resolve file path (handle relative paths)
+    const resolvedPath = resolve(filePath);
+    if (!existsSync(resolvedPath)) {
+      console.warn(`Warning: Site health file not found: ${resolvedPath}`);
+      return null;
+    }
+
+    const content = readFileSync(resolvedPath, 'utf8');
+    const data = {
+      wpVersion: null,
+      phpVersion: null,
+      theme: null,
+      plugins: [],
+      options: {},
+    };
+
+    // Parse sections
+    // Handle leading backtick if present (strip it)
+    const cleanContent = content.trim().startsWith('`') ? content.trim().slice(1).trim() : content;
+    const sections = cleanContent.split(/^###\s+/m);
+
+    for (const section of sections) {
+      if (!section.trim()) continue;
+
+      const lines = section.split('\n');
+      const sectionNameRaw = lines[0].trim().replace(/\s*###\s*$/, '');
+      // Extract base section name (remove count in parentheses like "(11)")
+      const sectionName = sectionNameRaw.split(' ')[0];
+
+      // Parse wp-core section
+      if (sectionName === 'wp-core') {
+        for (const line of lines.slice(1)) {
+          const match = line.match(/^(\w+):\s*(.+)$/);
+          if (match) {
+            const key = match[1];
+            const value = match[2].trim();
+
+            if (key === 'version') {
+              data.wpVersion = value;
+            } else if (key === 'permalink') {
+              data.options.permalink_structure = value;
+            } else if (key === 'blog_public') {
+              data.options.blog_public = value === '1' ? '1' : '0';
+            } else if (key === 'default_comment_status') {
+              data.options.default_comment_status = value;
+            }
+          }
+        }
+      }
+
+      // Parse wp-server section
+      if (sectionName === 'wp-server') {
+        for (const line of lines.slice(1)) {
+          const match = line.match(/^php_version:\s*(.+)$/);
+          if (match) {
+            // Extract major.minor version (e.g., "8.3.29 64bit" -> "8.3")
+            const versionStr = match[1].trim();
+            const versionMatch = versionStr.match(/^(\d+\.\d+)/);
+            if (versionMatch) {
+              data.phpVersion = versionMatch[1];
+            }
+          }
+        }
+      }
+
+      // Parse wp-active-theme section
+      if (sectionName === 'wp-active-theme') {
+        let themeName = null;
+        let themeVersion = null;
+
+        for (const line of lines.slice(1)) {
+          const match = line.match(/^(\w+):\s*(.+)$/);
+          if (match) {
+            const key = match[1];
+            const value = match[2].trim();
+
+            if (key === 'name') {
+              // Extract slug from name like "Twenty Twenty-One (twentytwentyone)"
+              const slugMatch = value.match(/\(([^)]+)\)$/);
+              if (slugMatch) {
+                themeName = slugMatch[1];
+              } else {
+                // Fallback: use name as-is, lowercased and spaces replaced
+                themeName = value.toLowerCase().replace(/\s+/g, '-');
+              }
+            } else if (key === 'version') {
+              themeVersion = value;
+            }
+          }
+        }
+
+        if (themeName) {
+          data.theme = themeVersion ? `${themeName}@${themeVersion}` : themeName;
+        }
+      }
+
+      // Parse wp-plugins-active section
+      if (sectionName === 'wp-plugins-active') {
+        for (const line of lines.slice(1)) {
+          if (!line.trim()) continue;
+
+          // Format: "Plugin Name: version: X.Y.Z, author: ..." or "Plugin Name: Subtitle: version: X.Y.Z, ..."
+          // Find "version:" and extract everything before it as plugin name, and after it as version
+          const versionIndex = line.indexOf('version:');
+          if (versionIndex === -1) continue;
+
+          const pluginNamePart = line.substring(0, versionIndex).trim();
+          // Remove trailing colon if present
+          const pluginName = pluginNamePart.replace(/\s*:\s*$/, '');
+
+          // Extract version (everything after "version:" until comma or end)
+          const versionPart = line.substring(versionIndex + 'version:'.length).trim();
+          const versionMatch = versionPart.match(/^([^,]+)/);
+          if (!versionMatch) continue;
+
+          const pluginVersion = versionMatch[1].trim();
+
+          // Extract slug from plugin name
+          // For wordpress.org plugins, we need the slug, not the display name
+          // Try to extract from format like "ActivityPub" or "Akismet Anti-spam: Spam Protection"
+          // Use the first part before any colon as the base name
+          let pluginSlug = pluginName.split(':')[0].trim().toLowerCase().replace(/\s+/g, '-');
+
+          // Common plugin slug mappings (MVP: handle a few common ones)
+          const slugMap = {
+            'akismet-anti-spam': 'akismet',
+            'crowdsignal-forms': 'crowdsignal-forms',
+            'crowdsignal-polls-&-ratings': 'polldaddy',
+            'gravatar-enhanced': 'gravatar-enhanced',
+            'page-optimize': 'page-optimize',
+            'layout-grid': 'layout-grid',
+            'activitypub': 'activitypub',
+            'coblocks': 'coblocks',
+            'gutenberg': 'gutenberg',
+            'jetpack': 'jetpack',
+            'underminer': 'underminer',
+          };
+
+          if (slugMap[pluginSlug]) {
+            pluginSlug = slugMap[pluginSlug];
+          }
+
+          const pluginSpec = pluginVersion ? `${pluginSlug}@${pluginVersion}` : pluginSlug;
+          data.plugins.push(pluginSpec);
+        }
+      }
+    }
+
+    return data;
+  } catch (error) {
+    console.warn(`Warning: Could not parse site health file ${filePath}:`, error.message);
+    return null;
+  }
+}
+
 async function resolveBlueprintFromArg(arg) {
   if (!arg) return null;
   try {
@@ -231,6 +393,29 @@ export async function launchWordPress() {
 
   let cliServer;
   try {
+    // Parse site health file if provided
+    const siteHealthPath = process.env.WP_SITE_HEALTH;
+    let siteHealthData = null;
+    if (siteHealthPath) {
+      siteHealthData = parseSiteHealthFile(siteHealthPath);
+      if (siteHealthData) {
+        console.log(`✓ Parsed site health data from ${siteHealthPath}`);
+        console.log(`  - Plugins found: ${siteHealthData.plugins.length}`);
+
+        // Override environment variables with site health data
+        if (siteHealthData.wpVersion && !process.env.WP_WP_VERSION) {
+          process.env.WP_WP_VERSION = siteHealthData.wpVersion;
+        }
+        if (siteHealthData.theme && !process.env.WP_THEME) {
+          process.env.WP_THEME = siteHealthData.theme;
+        }
+        if (siteHealthData.plugins.length > 0 && !process.env.WP_PLUGINS) {
+          process.env.WP_PLUGINS = siteHealthData.plugins.join(',');
+          console.log(`  - Set WP_PLUGINS: ${process.env.WP_PLUGINS}`);
+        }
+      }
+    }
+
     // Resolve optional user-provided blueprint
     const blueprintArg = extractBlueprintArgFromProcess();
     const userBlueprint = await resolveBlueprintFromArg(blueprintArg);
@@ -286,8 +471,30 @@ file_put_contents($log_path, $header, FILE_APPEND | LOCK_EX);
     // Build steps from CLI arguments (import, theme, plugins)
     const cliSteps = buildCliBlueprintSteps(ourTempDir);
 
-    // Combine all steps: base steps first, then CLI steps, then user blueprint steps
-    const allSteps = [...baseSteps, ...cliSteps];
+    // Add site health options as blueprint steps
+    const siteHealthSteps = [];
+    if (siteHealthData && siteHealthData.options) {
+      const optionsToSet = {};
+      if (siteHealthData.options.permalink_structure) {
+        optionsToSet.permalink_structure = siteHealthData.options.permalink_structure;
+      }
+      if (siteHealthData.options.blog_public !== undefined) {
+        optionsToSet.blog_public = siteHealthData.options.blog_public;
+      }
+      if (siteHealthData.options.default_comment_status) {
+        optionsToSet.default_comment_status = siteHealthData.options.default_comment_status;
+      }
+
+      if (Object.keys(optionsToSet).length > 0) {
+        siteHealthSteps.push({
+          step: 'setSiteOptions',
+          options: optionsToSet,
+        });
+      }
+    }
+
+    // Combine all steps: base steps first, then CLI steps, then site health steps, then user blueprint steps
+    const allSteps = [...baseSteps, ...cliSteps, ...siteHealthSteps];
     if (userBlueprint && Array.isArray(userBlueprint.steps)) {
       allSteps.push(...userBlueprint.steps);
     }
@@ -297,11 +504,14 @@ file_put_contents($log_path, $header, FILE_APPEND | LOCK_EX);
     // Get WordPress version from environment variable, default to 'latest'
     const wpVersion = process.env.WP_WP_VERSION || 'latest';
 
+    // Get PHP version from site health data or default to '8.3'
+    const phpVersion = (siteHealthData && siteHealthData.phpVersion) || '8.3';
+
     // Mount our temp directory to /wordpress before installation
     // This ensures WordPress files (including debug.log) are stored in our known directory
     cliServer = await runCLI({
       command: 'server',
-      php: '8.3',
+      php: phpVersion,
       wp: wpVersion,
       login: true,
       debug: true,
@@ -320,6 +530,24 @@ file_put_contents($log_path, $header, FILE_APPEND | LOCK_EX);
     // Log WordPress version
     if (process.env.WP_WP_VERSION) {
       console.log(`✓ Will use WordPress version: ${process.env.WP_WP_VERSION}`);
+    }
+
+    // Log PHP version
+    if (siteHealthData && siteHealthData.phpVersion) {
+      console.log(`✓ Will use PHP version: ${siteHealthData.phpVersion}`);
+    }
+
+    // Log site health configuration
+    if (siteHealthData) {
+      if (siteHealthData.theme) {
+        console.log(`✓ Will install and activate theme from site health: ${siteHealthData.theme}`);
+      }
+      if (siteHealthData.plugins.length > 0) {
+        console.log(`✓ Will install and activate plugins from site health: ${siteHealthData.plugins.join(', ')}`);
+      }
+      if (Object.keys(siteHealthData.options).length > 0) {
+        console.log(`✓ Will set options from site health: ${Object.keys(siteHealthData.options).join(', ')}`);
+      }
     }
 
     // Log CLI argument actions

@@ -69,6 +69,11 @@ async function main() {
     // Do not forward --wpversion to Playwright
   }
 
+  if (options['site-health'] || options.siteHealth) {
+    env.WP_SITE_HEALTH = options['site-health'] || options.siteHealth;
+    // Do not forward --site-health to Playwright
+  }
+
   // Handle FULL_MODE flag
   if (options.full || options.fullMode || process.env.FULL_MODE === '1') {
     env.FULL_MODE = '1';
@@ -165,6 +170,7 @@ async function main() {
       if (key !== 'blueprint' && key !== 'debugLog' && key !== 'debug-log' &&
           key !== 'import' && key !== 'theme' && key !== 'plugin' &&
           key !== 'wpversion' && key !== 'wp-version' &&
+          key !== 'site-health' && key !== 'siteHealth' &&
           key !== 'full' && key !== 'fullMode' && key !== 'debug' &&
           key !== 'capture' && key !== 'clear-snapshots' && key !== 'clearSnapshots' &&
           key !== 'skip-snapshots' && key !== 'skipSnapshots' &&
