@@ -171,8 +171,10 @@ add_action('http_api_debug', function($response, $context, $class, $args, $url) 
   if (is_wp_error($response)) {
     $error_message = $response->get_error_message();
     if (stripos($error_message, 'timeout') !== false || stripos($error_message, 'timed out') !== false) {
+      // Get the current request URI to include in the error message
+      $request_uri = isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : 'unknown';
       trigger_error(
-        sprintf('HTTP request failed: %s (URL: %s)', $error_message, $url),
+        sprintf('HTTP request failed: %s (URL: %s) (Request URI: %s)', $error_message, $url, $request_uri),
         E_USER_WARNING
       );
     }
