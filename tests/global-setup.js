@@ -78,6 +78,19 @@ async function globalSetup() {
 
   console.log('Global setup: WordPress data will be discovered lazily in tests (using Playwright page.request)');
 
+  // Write a marker to the debug log to indicate setup is complete and tests are about to start
+  if (wpInstance.debugLogPath) {
+    try {
+      const { writeFileSync, appendFileSync, existsSync } = await import('fs');
+      const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
+      const marker = `[${timestamp}] [Global Setup] WordPress setup complete - tests are about to start\n`;
+      appendFileSync(wpInstance.debugLogPath, marker);
+      console.log('Global setup: Added marker to debug log');
+    } catch (error) {
+      console.warn('Warning: Could not write marker to debug log:', error.message);
+    }
+  }
+
   // Return the instance for teardown
   return wpInstance;
 }
