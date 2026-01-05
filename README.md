@@ -6,6 +6,8 @@ Cross-Fit is intended to help answer the question "will changing (this thing) br
 
 It's designed to catch things like PHP and JS errors, especially those that might appear only on one page of a site.
 
+It can also be used to do a visual comparison, to detect (for example) unexpected layout or content changes triggered by a plugin upgrade.
+
 ## Overview
 
 This MVP demonstrates feasibility of using WordPress Playground for E2E testing. It spins up a local WordPress instance, makes HTTP requests to it, and validates basic functionality.
