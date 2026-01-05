@@ -5,11 +5,113 @@ import { dirname, join, resolve, basename } from 'path';
 import { tmpdir } from 'os';
 
 /**
+ * Query WordPress.org plugins update-check API to map plugin names to slugs
+ * Uses the update-check API which accepts plugin metadata (Name, Author, Version)
+ * and returns the correct plugin slug. All plugins are queried in a single API call.
+ * @param {Array<Object>} plugins - Array of objects with {name, author, version}
+ * @returns {Promise<Map<string, string>>} Map of plugin name to slug
+ */
+async function mapPluginNamesToSlugs(plugins) {
+  const nameToSlug = new Map();
+
+  if (!plugins || plugins.length === 0) {
+    return nameToSlug;
+  }
+
+  try {
+    // Build request body for update-check API
+    // Format: { "plugins": { "arbitrary-path.php": { "Name": "...", "Author": "...", "Version": "..." } }, "active": ["path.php", ...] }
+    const pluginsData = {};
+    const activePlugins = [];
+
+    plugins.forEach((plugin, index) => {
+      // Use arbitrary path like "unknown.php" or "plugin-{index}.php"
+      const path = `plugin-${index}.php`;
+      pluginsData[path] = {
+        Name: plugin.name,
+        Version: plugin.version || '0.0.0',
+      };
+      // Add Author if available (send full name as-is)
+      if (plugin.author) {
+        pluginsData[path].Author = plugin.author;
+      }
+      activePlugins.push(path);
+    });
+
+    // Build request body in the format expected by update-check API
+    // Format: POST with form data containing plugins (with active array), translations, locale, and all=true
+    const pluginsPayload = {
+      plugins: pluginsData,
+      active: activePlugins,
+    };
+
+    const pluginsJson = JSON.stringify(pluginsPayload);
+
+    const formData = new URLSearchParams();
+    formData.append('plugins', pluginsJson);
+    formData.append('translations', JSON.stringify([]));
+    formData.append('locale', JSON.stringify(['en_US']));
+    formData.append('all', 'true');
+
+    const response = await fetch('https://api.wordpress.org/plugins/update-check/1.1/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'cross-fit/1.0',
+      },
+      body: formData.toString(),
+    });
+    console.log('formData', formData);
+    console.log('response', response);
+    if (response.ok) {
+      const data = await response.json();
+      console.log('data', data);
+      console.log('data', data);
+
+      // Response format: { "plugins": {...}, "no_update": { "path.php": { "slug": "...", ... } } }
+      // Check both "plugins" (updates available) and "no_update" (no updates)
+      const allPlugins = { ...(data.plugins || {}), ...(data.no_update || {}) };
+
+      // Map response back to our plugin names
+      activePlugins.forEach((path, index) => {
+        const pluginInfo = allPlugins[path];
+        if (pluginInfo && pluginInfo.slug) {
+          const originalPlugin = plugins[index];
+          nameToSlug.set(originalPlugin.name, pluginInfo.slug);
+        }
+      });
+    }
+  } catch (error) {
+    console.warn(`Warning: Could not query WordPress.org plugins update-check API:`, error.message);
+  }
+
+  // Fallback: derive slug from name for any plugins that weren't mapped
+  plugins.forEach((plugin) => {
+    if (!nameToSlug.has(plugin.name)) {
+      const candidateSlug = plugin.name
+        .split(':')[0] // Take first part before colon
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '-')
+        .replace(/[^a-z0-9-]/g, '')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+
+      if (candidateSlug) {
+        nameToSlug.set(plugin.name, candidateSlug);
+      }
+    }
+  });
+
+  return nameToSlug;
+}
+
+/**
  * Parse WordPress Site Health data from a text file
  * @param {string} filePath - Path to the site health text file
- * @returns {Object|null} Parsed site health data or null if file cannot be read
+ * @returns {Promise<Object|null>} Parsed site health data or null if file cannot be read
  */
-function parseSiteHealthFile(filePath) {
+async function parseSiteHealthFile(filePath) {
   try {
     // Resolve file path (handle relative paths)
     const resolvedPath = resolve(filePath);
@@ -80,6 +182,7 @@ function parseSiteHealthFile(filePath) {
       if (sectionName === 'wp-active-theme') {
         let themeName = null;
         let themeVersion = null;
+        let themePath = null;
 
         for (const line of lines.slice(1)) {
           const match = line.match(/^(\w+):\s*(.+)$/);
@@ -88,22 +191,43 @@ function parseSiteHealthFile(filePath) {
             const value = match[2].trim();
 
             if (key === 'name') {
-              // Extract slug from name like "Twenty Twenty-One (twentytwentyone)"
+              // Extract slug from name - it's in parentheses like "Twenty Twenty-One (twentytwentyone)"
               const slugMatch = value.match(/\(([^)]+)\)$/);
               if (slugMatch) {
+                // Slug is provided in parentheses, use it directly
                 themeName = slugMatch[1];
               } else {
-                // Fallback: use name as-is, lowercased and spaces replaced
-                themeName = value.toLowerCase().replace(/\s+/g, '-');
+                // No slug in parentheses, will extract from theme_path or derive from name
+                themeName = value;
               }
             } else if (key === 'version') {
               themeVersion = value;
+            } else if (key === 'theme_path') {
+              // Extract slug from theme_path like "/wordpress/themes/pub/twentytwentyone"
+              // The slug is the last directory name
+              const pathMatch = value.match(/\/([^/]+)\/?$/);
+              if (pathMatch) {
+                themePath = pathMatch[1];
+              }
             }
           }
         }
 
-        if (themeName) {
-          data.theme = themeVersion ? `${themeName}@${themeVersion}` : themeName;
+        // Determine theme slug: from parentheses, theme_path, or derive from name
+        let themeSlug = null;
+        if (themeName && themeName === themeName.toLowerCase() && !themeName.includes(' ')) {
+          // Already a slug (from parentheses)
+          themeSlug = themeName;
+        } else if (themePath) {
+          // Extract from theme_path
+          themeSlug = themePath;
+        } else if (themeName) {
+          // Derive from name
+          themeSlug = themeName.toLowerCase().replace(/\s+/g, '-');
+        }
+
+        if (themeSlug) {
+          data.theme = themeVersion ? `${themeSlug}@${themeVersion}` : themeSlug;
         }
       }
 
@@ -128,35 +252,44 @@ function parseSiteHealthFile(filePath) {
 
           const pluginVersion = versionMatch[1].trim();
 
-          // Extract slug from plugin name
-          // For wordpress.org plugins, we need the slug, not the display name
-          // Try to extract from format like "ActivityPub" or "Akismet Anti-spam: Spam Protection"
-          // Use the first part before any colon as the base name
-          let pluginSlug = pluginName.split(':')[0].trim().toLowerCase().replace(/\s+/g, '-');
-
-          // Common plugin slug mappings (MVP: handle a few common ones)
-          const slugMap = {
-            'akismet-anti-spam': 'akismet',
-            'crowdsignal-forms': 'crowdsignal-forms',
-            'crowdsignal-polls-&-ratings': 'polldaddy',
-            'gravatar-enhanced': 'gravatar-enhanced',
-            'page-optimize': 'page-optimize',
-            'layout-grid': 'layout-grid',
-            'activitypub': 'activitypub',
-            'coblocks': 'coblocks',
-            'gutenberg': 'gutenberg',
-            'jetpack': 'jetpack',
-            'underminer': 'underminer',
-          };
-
-          if (slugMap[pluginSlug]) {
-            pluginSlug = slugMap[pluginSlug];
+          // Extract author (everything after "author:" until ", Updates" or ", Auto-updates" or end of line)
+          // Author names can contain commas (e.g., "Automattic, Inc."), so we can't just stop at first comma
+          let pluginAuthor = null;
+          const authorIndex = line.indexOf('author:');
+          if (authorIndex !== -1) {
+            const authorPart = line.substring(authorIndex + 'author:'.length).trim();
+            // Find the end of author field - it's followed by ", Updates" or ", Auto-updates" or end of line
+            // Look for patterns like ", Updates managed" or ", Auto-updates enabled"
+            const updatesMatch = authorPart.match(/^(.+?)(?:,\s*(?:Updates|Auto-updates))/);
+            if (updatesMatch) {
+              pluginAuthor = updatesMatch[1].trim();
+            } else {
+              // Fallback: take everything until end of line
+              pluginAuthor = authorPart.trim();
+            }
           }
 
-          const pluginSpec = pluginVersion ? `${pluginSlug}@${pluginVersion}` : pluginSlug;
-          data.plugins.push(pluginSpec);
+          // Store plugin name, version, and author for API lookup
+          if (!data._pluginNames) data._pluginNames = [];
+          data._pluginNames.push({ name: pluginName, version: pluginVersion, author: pluginAuthor });
         }
       }
+    }
+
+    // Query WordPress.org update-check API to map plugin names to slugs
+    if (data._pluginNames && data._pluginNames.length > 0) {
+      const pluginNameToSlug = await mapPluginNamesToSlugs(data._pluginNames);
+
+      // Build plugin specs with mapped slugs
+      for (const plugin of data._pluginNames) {
+        const slug = pluginNameToSlug.get(plugin.name) ||
+                     plugin.name.split(':')[0].trim().toLowerCase().replace(/\s+/g, '-');
+        const pluginSpec = plugin.version ? `${slug}@${plugin.version}` : slug;
+        data.plugins.push(pluginSpec);
+      }
+
+      // Clean up temporary data
+      delete data._pluginNames;
     }
 
     return data;
@@ -398,7 +531,7 @@ export async function launchWordPress() {
     const upgradeAll = process.env.WP_UPGRADE_ALL === '1';
     let siteHealthData = null;
     if (siteHealthPath) {
-      siteHealthData = parseSiteHealthFile(siteHealthPath);
+      siteHealthData = await parseSiteHealthFile(siteHealthPath);
       if (siteHealthData) {
         console.log(`✓ Parsed site health data from ${siteHealthPath}`);
         console.log(`  - Plugins found: ${siteHealthData.plugins.length}`);
