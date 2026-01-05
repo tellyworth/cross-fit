@@ -61,12 +61,9 @@ async function mapPluginNamesToSlugs(plugins) {
       },
       body: formData.toString(),
     });
-    console.log('formData', formData);
-    console.log('response', response);
+
     if (response.ok) {
       const data = await response.json();
-      console.log('data', data);
-      console.log('data', data);
 
       // Response format: { "plugins": {...}, "no_update": { "path.php": { "slug": "...", ... } } }
       // Check both "plugins" (updates available) and "no_update" (no updates)
@@ -558,7 +555,6 @@ export async function launchWordPress() {
             ? siteHealthData.plugins.map(p => p.includes('@') ? p.split('@')[0] : p)
             : siteHealthData.plugins;
           process.env.WP_PLUGINS = pluginsSpec.join(',');
-          console.log(`  - Set WP_PLUGINS: ${process.env.WP_PLUGINS}`);
         }
       }
     }
@@ -711,14 +707,14 @@ file_put_contents($log_path, $header, FILE_APPEND | LOCK_EX);
       }
     }
 
-    // Log CLI argument actions
+    // Log CLI argument actions (only if not already logged by site health)
     if (process.env.WP_IMPORT) {
       console.log(`✓ Will import WXR file: ${process.env.WP_IMPORT}`);
     }
-    if (process.env.WP_THEME) {
+    if (process.env.WP_THEME && !siteHealthData) {
       console.log(`✓ Will install and activate theme: ${process.env.WP_THEME}`);
     }
-    if (process.env.WP_PLUGINS) {
+    if (process.env.WP_PLUGINS && !siteHealthData) {
       const plugins = process.env.WP_PLUGINS.split(',').map(s => s.trim()).filter(s => s);
       console.log(`✓ Will install and activate plugins: ${plugins.join(', ')}`);
     }
