@@ -39,10 +39,9 @@ async function main() {
   // Map known options to env vars and strip from passthrough
   const env = { ...process.env };
 
-  // Check for flag-style options in passthrough (e.g., --upgrade-all without value)
-  if (passthrough.includes('--upgrade-all')) {
+  // Check for upgrade-all flag (can be in passthrough as --upgrade-all or in options as --upgrade-all=value)
+  if (passthrough.includes('--upgrade-all') || options['upgrade-all'] || options.upgradeAll) {
     env.WP_UPGRADE_ALL = '1';
-    // Remove from passthrough so it doesn't get forwarded to Playwright
   }
 
   if (options.blueprint) {
@@ -78,11 +77,6 @@ async function main() {
   if (options['site-health'] || options.siteHealth) {
     env.WP_SITE_HEALTH = options['site-health'] || options.siteHealth;
     // Do not forward --site-health to Playwright
-  }
-
-  if (options['upgrade-all'] || options.upgradeAll) {
-    env.WP_UPGRADE_ALL = '1';
-    // Do not forward --upgrade-all to Playwright
   }
 
   // Handle FULL_MODE flag
