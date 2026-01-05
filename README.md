@@ -80,6 +80,37 @@ npm test -- --wpversion=6.5 --theme=mytheme@1.2 --plugin=akismet@3.4.5,jetpack@4
 
 **Note**: Version numbers (using `@version` notation) only apply to plugins and themes downloaded from wordpress.org. They are ignored for local file paths and URLs.
 
+#### Using Site Health data to configure a site
+
+Cross-Fit can parse and use data copy-pasted from the WordPress Site Health feature to spin up a site running identical versions of core, plugins, and themes. To use it:
+
+1. Visit the Site Health / Info page of a live WordPress site
+2. Click `Copy site info to clipboard`
+3. Save the clipboard contents to a file
+
+Then, to run cross-fit with identical plugin and theme versions:
+
+```bash
+# Use a file containing text copy-pasted from Site Health to configure the site (theme, plugins, versions, etc):
+npm test -- --site-health=./site-health-sample.txt
+
+# Use site-health data, but with all plugins/themes upgraded to the latest versions:
+npm test -- --site-health=./site-health-sample.txt --upgrade-all
+
+# Combine this with visual snapshots (see below):
+npm test -- --site-health=./site-health-sample.txt --capture
+# Now compare with upgraded plugins and theme:
+npm test -- --site-health=./site-health-sample.txt --upgrade-all
+```
+
+You'll see output similar to this during init:
+
+```
+✓ Will install and activate theme from site health: twentytwentyone@2.7
+✓ Will install and activate plugins from site health: activitypub@7.8.2, akismet@5.6, coblocks@3.1.16, crowdsignal-forms@1.7.2, polldaddy@3.1.4, gravatar-enhanced@0.13.0, gutenberg@22.2.0, jetpack@15.4-a.5, layout-grid@1.8.4, page-optimize@0.5.8
+✓ Will set options from site health: permalink_structure, blog_public, default_comment_status
+```
+
 #### Screenshot Baseline Comparison
 
 Cross-Fit can capture and compare screenshots of pages to detect visual changes between plugin versions, themes, or WordPress updates.

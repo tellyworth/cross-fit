@@ -1,0 +1,128 @@
+`
+### wp-core ###
+
+version: 6.9
+site_language: en_US
+user_language: en_US
+timezone: Australia/Canberra
+permalink: /%year%/%monthnum%/%day%/%postname%/
+https_status: true
+multisite: false
+user_registration: 0
+blog_public: 1
+default_comment_status: open
+environment_type: production
+user_count: 2
+dotorg_communication: true
+
+### wp-active-theme ###
+
+name: Twenty Twenty-One (twentytwentyone)
+version: 2.7
+author: the WordPress team
+author_website: https://wordpress.org/
+parent_theme: none
+theme_features: widgets-block-editor, automatic-feed-links, title-tag, post-formats, post-thumbnails, menus, html5, custom-logo, customize-selective-refresh-widgets, wp-block-styles, align-wide, editor-styles, editor-style, editor-font-sizes, custom-background, editor-color-palette, editor-gradient-presets, responsive-embeds, custom-line-height, link-color, custom-spacing, custom-units, jetpack-global-styles, jetpack-content-options, infinite-scroll, widgets
+theme_path: /wordpress/themes/pub/twentytwentyone
+auto_update: Updates managed by WordPress.com
+
+### wp-themes-inactive (1) ###
+
+Twenty Twenty-Two: version: 2.1-wpcom, author: the WordPress team, Updates managed by WordPress.com
+
+
+### wp-plugins-active (10) ###
+
+ActivityPub: version: 7.8.2, author: Matthias Pfefferle & Automattic, Auto-updates enabled
+Akismet Anti-spam: Spam Protection: version: 5.6, author: Automattic - Anti-spam Team, Updates managed by WordPress.com
+CoBlocks: version: 3.1.16, author: GoDaddy, Updates managed by WordPress.com
+Crowdsignal Forms: version: 1.7.2, author: Automattic, Updates managed by WordPress.com
+Crowdsignal Polls & Ratings: version: 3.1.4, author: Automattic, Inc., Updates managed by WordPress.com
+Gravatar Enhanced: version: 0.13.0, author: Automattic, Updates managed by WordPress.com
+Gutenberg: version: 22.2.0, author: Gutenberg Team, Updates managed by WordPress.com
+Jetpack: version: 15.4-a.5, author: Automattic, Updates managed by WordPress.com
+Layout Grid: version: 1.8.4, author: Automattic, Updates managed by WordPress.com
+Page Optimize: version: 0.5.8, author: Automattic, Updates managed by WordPress.com
+
+### wp-plugins-inactive (1) ###
+
+Classic Editor: version: 1.6.7, author: WordPress Contributors, Updates managed by WordPress.com
+
+### wp-media ###
+
+image_editor: Photon_Subsizes_WP_Image_Editor_GD
+imagick_module_version: Not available
+imagemagick_version: Not available
+imagick_version: Not available
+file_uploads: 1
+post_max_size: 2047M
+upload_max_filesize: 2047M
+max_effective_size: 2 GB
+max_file_uploads: 20
+image_format_transforms: image/heic → image/jpeg, image/heif → image/jpeg, image/heic-sequence → image/jpeg, image/heif-sequence → image/jpeg
+gd_version: bundled (2.1.0 compatible)
+gd_formats: GIF, JPEG, PNG, WebP, BMP, AVIF
+ghostscript_version: not available
+
+### wp-server ###
+
+server_architecture: Linux 6.12.57+deb12-amd64 x86_64
+httpd_software: nginx
+php_version: 8.3.29 64bit
+php_sapi: fpm-fcgi
+max_input_variables: 6144
+time_limit: 850
+memory_limit: 512M
+max_input_time: 850
+upload_max_filesize: 2047M
+php_post_max_size: 2047M
+curl_version: 8.14.1 OpenSSL/3.0.17
+suhosin: false
+imagick_availability: false
+pretty_permalinks: true
+static_robotstxt_file: false
+current: 2026-01-02T03:54:50+00:00
+utc-time: Friday, 02-Jan-26 03:54:50 UTC
+server-time: 2026-01-02T14:54:49+11:00
+
+### wp-database ###
+
+extension: mysqli
+server_version: 11.4.9-MariaDB-log
+client_version: mysqlnd 8.3.29
+max_allowed_packet: 104857600
+max_connections: 500
+
+### wp-constants ###
+
+WP_HOME: https://example.com
+WP_SITEURL: https://example.com
+WP_CONTENT_DIR: /srv/htdocs/wp-content
+WP_PLUGIN_DIR: /srv/htdocs/wp-content/plugins
+WP_MEMORY_LIMIT: 512M
+WP_MAX_MEMORY_LIMIT: 512M
+WP_DEBUG: true
+WP_DEBUG_DISPLAY: false
+WP_DEBUG_LOG: false
+SCRIPT_DEBUG: false
+WP_CACHE: false
+CONCATENATE_SCRIPTS: undefined
+COMPRESS_SCRIPTS: undefined
+COMPRESS_CSS: undefined
+WP_ENVIRONMENT_TYPE: undefined
+WP_DEVELOPMENT_MODE: undefined
+DB_CHARSET: latin1
+DB_COLLATE: latin1_swedish_ci
+
+### wp-filesystem ###
+
+wordpress: not writable
+wp-content: writable
+uploads: writable
+plugins: writable
+themes: writable
+fonts: does not exist
+mu-plugins: writable
+
+
+`
