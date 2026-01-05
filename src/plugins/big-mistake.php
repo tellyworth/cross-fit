@@ -164,6 +164,130 @@ add_filter('http_request_args', 'big_mistake_reduce_http_timeout', 999, 2);
 
 
 /**
+ * Get a trimmed backtrace with big-mistake frames removed from the top
+ * Formats the backtrace for logging to debug.log
+ *
+ * @param int $skip_frames Number of frames to skip from the top (default: auto-detect big-mistake frames)
+ * @param int $limit Maximum number of frames to include (default: 15)
+ * @return string Formatted backtrace string
+ */
+function big_mistake_get_trimmed_backtrace($skip_frames = null, $limit = 15) {
+  // Include args so we can show hook names for do_action/apply_filters
+  $backtrace = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, $limit + 10);
+  $big_mistake_file = __FILE__;
+  $abspath = defined('ABSPATH') ? ABSPATH : '';
+
+  // If skip_frames not specified, auto-detect: skip frames from big-mistake.php and error handler
+  if ($skip_frames === null) {
+    $skip_frames = 0;
+    foreach ($backtrace as $frame) {
+      // Skip big-mistake.php files
+      if (isset($frame['file']) && $frame['file'] === $big_mistake_file) {
+        $skip_frames++;
+        continue;
+      }
+      // Skip the error handler function itself
+      if (isset($frame['function']) && $frame['function'] === 'big_mistake_error_handler') {
+        $skip_frames++;
+        continue;
+      }
+      // Stop at first non-big-mistake frame
+      break;
+    }
+  }
+
+  // Remove the skipped frames
+  $backtrace = array_slice($backtrace, $skip_frames);
+  // Limit to requested number of frames
+  $backtrace = array_slice($backtrace, 0, $limit);
+
+  if (empty($backtrace)) {
+    return '  (no backtrace available)';
+  }
+
+  $lines = array();
+  foreach ($backtrace as $index => $frame) {
+    $file = isset($frame['file']) ? $frame['file'] : 'unknown';
+    $line = isset($frame['line']) ? $frame['line'] : '?';
+    $function = isset($frame['function']) ? $frame['function'] : 'unknown';
+
+    // Make file path relative for cleaner output
+    if ($abspath && strpos($file, $abspath) === 0) {
+      $file = str_replace($abspath, '', $file);
+    }
+
+    // For do_action and apply_filters, show the hook name (first argument)
+    $function_display = $function;
+    if (($function === 'do_action' || $function === 'apply_filters') && isset($frame['args'][0])) {
+      $hook_name = $frame['args'][0];
+      if (is_string($hook_name)) {
+        $function_display = sprintf('%s(\'%s\')', $function, $hook_name);
+      } else {
+        $function_display = sprintf('%s(...)', $function);
+      }
+    } else {
+      $function_display = $function . '()';
+    }
+
+    // Format: #0 file.php(123): function_name()
+    $lines[] = sprintf('  #%d %s(%s): %s', $index, $file, $line, $function_display);
+  }
+
+  return implode("\n", $lines);
+}
+
+/**
+ * Log PHP errors with backtraces to debug.log
+ */
+function big_mistake_error_handler($errno, $errstr, $errfile, $errline, $errcontext = null) {
+  // Only log if WP_DEBUG_LOG is enabled
+  if (!defined('WP_DEBUG_LOG') || !WP_DEBUG_LOG) {
+    return false; // Let WordPress handle it
+  }
+
+  // Get trimmed backtrace (skip this error handler frame)
+  $backtrace = big_mistake_get_trimmed_backtrace(1, 15);
+
+  // Format error message with backtrace
+  $error_types = array(
+    E_ERROR => 'E_ERROR',
+    E_WARNING => 'E_WARNING',
+    E_PARSE => 'E_PARSE',
+    E_NOTICE => 'E_NOTICE',
+    E_CORE_ERROR => 'E_CORE_ERROR',
+    E_CORE_WARNING => 'E_CORE_WARNING',
+    E_COMPILE_ERROR => 'E_COMPILE_ERROR',
+    E_COMPILE_WARNING => 'E_COMPILE_WARNING',
+    E_USER_ERROR => 'E_USER_ERROR',
+    E_USER_WARNING => 'E_USER_WARNING',
+    E_USER_NOTICE => 'E_USER_NOTICE',
+    E_STRICT => 'E_STRICT',
+    E_RECOVERABLE_ERROR => 'E_RECOVERABLE_ERROR',
+    E_DEPRECATED => 'E_DEPRECATED',
+    E_USER_DEPRECATED => 'E_USER_DEPRECATED',
+  );
+
+  $error_type = isset($error_types[$errno]) ? $error_types[$errno] : 'Unknown';
+  $message = sprintf(
+    "[%s] PHP %s: %s in %s on line %d\nBacktrace:\n%s",
+    date('Y-m-d H:i:s'),
+    $error_type,
+    $errstr,
+    $errfile,
+    $errline,
+    $backtrace
+  );
+
+  error_log($message);
+
+  // Return false to let WordPress continue with its normal error handling
+  return false;
+}
+
+// Register error handler for all error types
+set_error_handler('big_mistake_error_handler', E_ALL);
+
+/**
  * Catch failed HTTP requests (including timeouts) and surface as PHP warnings
  * http_api_debug runs for both successful responses and WP_Error
  */
@@ -173,6 +297,22 @@ add_action('http_api_debug', function($response, $context, $class, $args, $url) 
     if (stripos($error_message, 'timeout') !== false || stripos($error_message, 'timed out') !== false) {
       // Get the current request URI to include in the error message
       $request_uri = isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : 'unknown';
+
+      // Log backtrace to debug.log if WP_DEBUG_LOG is enabled
+      if (defined('WP_DEBUG_LOG') && WP_DEBUG_LOG) {
+        $backtrace = big_mistake_get_trimmed_backtrace(1, 15);
+        $log_message = sprintf(
+          "[%s] HTTP request failed: %s (URL: %s) (Request URI: %s)\nBacktrace:\n%s",
+          date('Y-m-d H:i:s'),
+          $error_message,
+          $url,
+          $request_uri,
+          $backtrace
+        );
+        error_log($log_message);
+      }
+
+      // Also trigger error so it appears in page output
       trigger_error(
         sprintf('HTTP request failed: %s (URL: %s) (Request URI: %s)', $error_message, $url, $request_uri),
         E_USER_WARNING
