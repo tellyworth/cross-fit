@@ -237,50 +237,82 @@ function big_mistake_get_trimmed_backtrace($skip_frames = null, $limit = 15) {
 }
 
 /**
- * Log PHP errors with backtraces to debug.log
+ * Log PHP errors with backtraces to debug.log.
+ *
+ * - Respects error_reporting(), including @-suppressed errors.
+ * - For errors triggered via wp_trigger_error() (E_USER_*), logs them but
+ *   prevents further handling so they are not output to the page. This avoids
+ *   cascading "Cannot modify header information" warnings caused by late output.
  */
 function big_mistake_error_handler($errno, $errstr, $errfile, $errline, $errcontext = null) {
-  // Only log if WP_DEBUG_LOG is enabled
-  if (!defined('WP_DEBUG_LOG') || !WP_DEBUG_LOG) {
-    return false; // Let WordPress handle it
+  // Respect @-suppression: if error_reporting() is 0, this error was silenced.
+  $reporting = error_reporting();
+  if (0 === $reporting) {
+    return false; // Do not log or modify default behavior.
   }
 
-  // Get trimmed backtrace (auto-detect will skip error handler and big-mistake frames)
-  $backtrace = big_mistake_get_trimmed_backtrace(null, 15);
+  // Obey error_reporting mask generally – skip errors that are not currently reported.
+  if (!($reporting & $errno)) {
+    return false;
+  }
 
-  // Format error message with backtrace
-  $error_types = array(
-    E_ERROR => 'E_ERROR',
-    E_WARNING => 'E_WARNING',
-    E_PARSE => 'E_PARSE',
-    E_NOTICE => 'E_NOTICE',
-    E_CORE_ERROR => 'E_CORE_ERROR',
-    E_CORE_WARNING => 'E_CORE_WARNING',
-    E_COMPILE_ERROR => 'E_COMPILE_ERROR',
-    E_COMPILE_WARNING => 'E_COMPILE_WARNING',
-    E_USER_ERROR => 'E_USER_ERROR',
-    E_USER_WARNING => 'E_USER_WARNING',
-    E_USER_NOTICE => 'E_USER_NOTICE',
-    E_STRICT => 'E_STRICT',
-    E_RECOVERABLE_ERROR => 'E_RECOVERABLE_ERROR',
-    E_DEPRECATED => 'E_DEPRECATED',
-    E_USER_DEPRECATED => 'E_USER_DEPRECATED',
-  );
+  // Detect if this error was triggered via wp_trigger_error().
+  $is_wp_trigger_error = false;
+  $trace_for_detection = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 10);
+  foreach ($trace_for_detection as $frame) {
+    if (isset($frame['function']) && 'wp_trigger_error' === $frame['function']) {
+      $is_wp_trigger_error = true;
+      break;
+    }
+  }
 
-  $error_type = isset($error_types[$errno]) ? $error_types[$errno] : 'Unknown';
-  $message = sprintf(
-    "[%s] PHP %s: %s in %s on line %d\nBacktrace:\n%s",
-    date('Y-m-d H:i:s'),
-    $error_type,
-    $errstr,
-    $errfile,
-    $errline,
-    $backtrace
-  );
+  // Only log if WP_DEBUG_LOG is enabled.
+  $should_log = defined('WP_DEBUG_LOG') && WP_DEBUG_LOG;
+  if ($should_log) {
+    // Get trimmed backtrace (auto-detect will skip error handler and big-mistake frames).
+    $backtrace = big_mistake_get_trimmed_backtrace(null, 15);
 
-  error_log($message);
+    // Format error message with backtrace.
+    $error_types = array(
+      E_ERROR => 'E_ERROR',
+      E_WARNING => 'E_WARNING',
+      E_PARSE => 'E_PARSE',
+      E_NOTICE => 'E_NOTICE',
+      E_CORE_ERROR => 'E_CORE_ERROR',
+      E_CORE_WARNING => 'E_CORE_WARNING',
+      E_COMPILE_ERROR => 'E_COMPILE_ERROR',
+      E_COMPILE_WARNING => 'E_COMPILE_WARNING',
+      E_USER_ERROR => 'E_USER_ERROR',
+      E_USER_WARNING => 'E_USER_WARNING',
+      E_USER_NOTICE => 'E_USER_NOTICE',
+      E_STRICT => 'E_STRICT',
+      E_RECOVERABLE_ERROR => 'E_RECOVERABLE_ERROR',
+      E_DEPRECATED => 'E_DEPRECATED',
+      E_USER_DEPRECATED => 'E_USER_DEPRECATED',
+    );
 
-  // Return false to let WordPress continue with its normal error handling
+    $error_type = isset($error_types[$errno]) ? $error_types[$errno] : 'Unknown';
+    $message = sprintf(
+      "[%s] PHP %s: %s in %s on line %d\nBacktrace:\n%s",
+      date('Y-m-d H:i:s'),
+      $error_type,
+      $errstr,
+      $errfile,
+      $errline,
+      $backtrace
+    );
+
+    error_log($message);
+  }
+
+  // For errors triggered via wp_trigger_error(), prevent further handling so they
+  // are not output to the page (but we've already logged them above).
+  $user_error_mask = E_USER_ERROR | E_USER_WARNING | E_USER_NOTICE | E_USER_DEPRECATED;
+  if ($is_wp_trigger_error && ($errno & $user_error_mask)) {
+    return true;
+  }
+
+  // For all other errors, return false to let WordPress / PHP continue as normal.
   return false;
 }
 
