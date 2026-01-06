@@ -370,6 +370,23 @@ function big_mistake_disable_update_checks() {
 add_action('init', 'big_mistake_disable_update_checks', 1);
 
 /**
+ * Disable WordPress translation API checks
+ * These checks try to connect to api.wordpress.org and cause errors when blocked
+ */
+function big_mistake_disable_translation_checks() {
+  // Filter translations_api to return empty result without making HTTP request
+  add_filter('translations_api', function($result, $requested_type, $args) {
+    // Return empty result to prevent WordPress from making HTTP requests
+    return array(
+      'translations' => array(),
+      'no_update' => array(),
+    );
+  }, 10, 3);
+}
+
+add_action('init', 'big_mistake_disable_translation_checks', 1);
+
+/**
  * Disable WordPress Heartbeat API to reduce server load
  * The Heartbeat API can cause slow admin pages in resource-constrained environments
  */
