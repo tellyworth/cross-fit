@@ -181,13 +181,13 @@ function big_mistake_get_trimmed_backtrace($skip_frames = null, $limit = 15) {
   if ($skip_frames === null) {
     $skip_frames = 0;
     foreach ($backtrace as $frame) {
-      // Skip big-mistake.php files
-      if (isset($frame['file']) && $frame['file'] === $big_mistake_file) {
+      // Skip the error handler function itself (even if file is not set)
+      if (isset($frame['function']) && $frame['function'] === 'big_mistake_error_handler') {
         $skip_frames++;
         continue;
       }
-      // Skip the error handler function itself
-      if (isset($frame['function']) && $frame['function'] === 'big_mistake_error_handler') {
+      // Skip big-mistake.php files
+      if (isset($frame['file']) && $frame['file'] === $big_mistake_file) {
         $skip_frames++;
         continue;
       }
@@ -245,8 +245,8 @@ function big_mistake_error_handler($errno, $errstr, $errfile, $errline, $errcont
     return false; // Let WordPress handle it
   }
 
-  // Get trimmed backtrace (skip this error handler frame)
-  $backtrace = big_mistake_get_trimmed_backtrace(1, 15);
+  // Get trimmed backtrace (auto-detect will skip error handler and big-mistake frames)
+  $backtrace = big_mistake_get_trimmed_backtrace(null, 15);
 
   // Format error message with backtrace
   $error_types = array(
@@ -300,7 +300,7 @@ add_action('http_api_debug', function($response, $context, $class, $args, $url) 
 
       // Log backtrace to debug.log if WP_DEBUG_LOG is enabled
       if (defined('WP_DEBUG_LOG') && WP_DEBUG_LOG) {
-        $backtrace = big_mistake_get_trimmed_backtrace(1, 15);
+        $backtrace = big_mistake_get_trimmed_backtrace(null, 15);
         $log_message = sprintf(
           "[%s] HTTP request failed: %s (URL: %s) (Request URI: %s)\nBacktrace:\n%s",
           date('Y-m-d H:i:s'),
@@ -311,12 +311,6 @@ add_action('http_api_debug', function($response, $context, $class, $args, $url) 
         );
         error_log($log_message);
       }
-
-      // Also trigger error so it appears in page output
-      trigger_error(
-        sprintf('HTTP request failed: %s (URL: %s) (Request URI: %s)', $error_message, $url, $request_uri),
-        E_USER_WARNING
-      );
     }
   }
 }, 10, 5);
