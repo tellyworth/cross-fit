@@ -305,13 +305,16 @@ function big_mistake_error_handler($errno, $errstr, $errfile, $errline, $errcont
     );
 
     $error_type = isset($error_types[$errno]) ? $error_types[$errno] : 'Unknown';
+    // Get the current request URI to include in the error message
+    $request_uri = isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : 'unknown';
     // WordPress's error_log() already adds a timestamp, so we don't include one here
     $message = sprintf(
-      "PHP %s: %s in %s on line %d%s",
+      "PHP %s: %s in %s on line %d (Request URI: %s)%s",
       $error_type,
       $errstr,
       $errfile,
       $errline,
+      $request_uri,
       $backtrace_text
     );
 
@@ -415,6 +418,10 @@ function big_mistake_disable_update_checks() {
   remove_action('load-update-core.php', 'wp_update_plugins');
   remove_action('load-update-core.php', 'wp_update_themes');
   remove_action('load-update-core.php', 'wp_version_check');
+
+  // Disable update checks on specific admin pages
+  remove_action('load-themes.php', 'wp_update_themes');
+  remove_action('load-plugins.php', 'wp_update_plugins');
 }
 
 add_action('init', 'big_mistake_disable_update_checks', 1);
