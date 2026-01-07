@@ -57,23 +57,47 @@ async function globalTeardown(wpInstance) {
     console.log(`[Global Teardown] Debug log path not available (instance may have crashed before setup completed)`);
   }
 
-  // Output debug log content if requested via CLI argument (--debug-log=n)
+  // Output debug log content if requested via CLI argument (--debug-log=n) or auto-detected
   const debugLogLines = process.env.WP_DEBUG_LOG_LINES;
+  const hasDebugFlag = process.env.WP_ENABLE_BACKTRACES === '1';
+  let linesToShow = null;
+
   if (debugLogLines) {
+    // Explicitly set via --debug-log
     const lines = parseInt(debugLogLines, 10);
-    if (!isNaN(lines) && lines > 0 && debugLogPath) {
-      try {
-        const logInstance = { debugLogPath };
-        const logContent = await readDebugLog(logInstance, { limit: lines });
-        if (logContent) {
-          console.log(`\n[Debug Log - Last ${lines} lines]:`);
-          console.log('='.repeat(80));
-          console.log(logContent);
-          console.log('='.repeat(80));
+    if (!isNaN(lines) && lines > 0) {
+      linesToShow = lines;
+    }
+  } else if (!hasDebugFlag && debugLogPath) {
+    // Auto-detection: --debug is off and --debug-log was not explicitly set
+    try {
+      const { existsSync, readFileSync } = await import('fs');
+      if (existsSync(debugLogPath)) {
+        const logContent = readFileSync(debugLogPath, 'utf8');
+        const lines = logContent.split('\n').filter(line => line.trim());
+        // We add 2 marker lines; if <= 2 lines, consider it empty (no errors)
+        // If > 2 lines, show last 12 lines (10 + 2 markers)
+        if (lines.length > 2) {
+          linesToShow = 12;
         }
-      } catch (error) {
-        console.error(`[Global Teardown] Error reading debug log:`, error.message);
       }
+    } catch (error) {
+      // Silently fail - auto-detection is best-effort
+    }
+  }
+
+  if (linesToShow && debugLogPath) {
+    try {
+      const logInstance = { debugLogPath };
+      const logContent = await readDebugLog(logInstance, { limit: linesToShow });
+      if (logContent) {
+        console.log(`\n[Debug Log - Last ${linesToShow} lines]:`);
+        console.log('='.repeat(80));
+        console.log(logContent);
+        console.log('='.repeat(80));
+      }
+    } catch (error) {
+      console.error(`[Global Teardown] Error reading debug log:`, error.message);
     }
   }
 

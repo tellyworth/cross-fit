@@ -269,10 +269,23 @@ function big_mistake_error_handler($errno, $errstr, $errfile, $errline, $errcont
   // Only log if WP_DEBUG_LOG is enabled.
   $should_log = defined('WP_DEBUG_LOG') && WP_DEBUG_LOG;
   if ($should_log) {
-    // Get trimmed backtrace (auto-detect will skip error handler and big-mistake frames).
-    $backtrace = big_mistake_get_trimmed_backtrace(null, 15);
+    // Determine if we should include backtrace.
+    // Backtraces are enabled if WP_ENABLE_BACKTRACES is set, OR for fatal errors.
+    // Fatal error types: E_ERROR, E_CORE_ERROR, E_COMPILE_ERROR, E_PARSE, E_RECOVERABLE_ERROR.
+    // This can be easily tweaked by modifying the $fatal_error_mask below.
+    $enable_backtraces = defined('WP_ENABLE_BACKTRACES') && WP_ENABLE_BACKTRACES;
+    $fatal_error_mask = E_ERROR | E_CORE_ERROR | E_COMPILE_ERROR | E_PARSE | E_RECOVERABLE_ERROR;
+    $is_fatal_error = (bool)($errno & $fatal_error_mask);
+    $include_backtrace = $enable_backtraces || $is_fatal_error;
 
-    // Format error message with backtrace.
+    $backtrace_text = '';
+    if ($include_backtrace) {
+      // Get trimmed backtrace (auto-detect will skip error handler and big-mistake frames).
+      $backtrace = big_mistake_get_trimmed_backtrace(null, 15);
+      $backtrace_text = "\nBacktrace:\n" . $backtrace;
+    }
+
+    // Format error message (with optional backtrace).
     $error_types = array(
       E_ERROR => 'E_ERROR',
       E_WARNING => 'E_WARNING',
@@ -292,14 +305,14 @@ function big_mistake_error_handler($errno, $errstr, $errfile, $errline, $errcont
     );
 
     $error_type = isset($error_types[$errno]) ? $error_types[$errno] : 'Unknown';
+    // WordPress's error_log() already adds a timestamp, so we don't include one here
     $message = sprintf(
-      "[%s] PHP %s: %s in %s on line %d\nBacktrace:\n%s",
-      date('Y-m-d H:i:s'),
+      "PHP %s: %s in %s on line %d%s",
       $error_type,
       $errstr,
       $errfile,
       $errline,
-      $backtrace
+      $backtrace_text
     );
 
     error_log($message);
@@ -331,18 +344,23 @@ add_action('http_api_debug', function($response, $context, $class, $args, $url) 
       $request_uri = isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : 'unknown';
 
       // Log backtrace to debug.log if WP_DEBUG_LOG is enabled
-      if (defined('WP_DEBUG_LOG') && WP_DEBUG_LOG) {
-        $backtrace = big_mistake_get_trimmed_backtrace(null, 15);
-        $log_message = sprintf(
-          "[%s] HTTP request failed: %s (URL: %s) (Request URI: %s)\nBacktrace:\n%s",
-          date('Y-m-d H:i:s'),
-          $error_message,
-          $url,
-          $request_uri,
-          $backtrace
-        );
-        error_log($log_message);
-      }
+        if (defined('WP_DEBUG_LOG') && WP_DEBUG_LOG) {
+          // Include backtrace only if WP_ENABLE_BACKTRACES is set (HTTP errors are warnings, not fatal)
+          $backtrace_text = '';
+          if (defined('WP_ENABLE_BACKTRACES') && WP_ENABLE_BACKTRACES) {
+            $backtrace = big_mistake_get_trimmed_backtrace(null, 15);
+            $backtrace_text = "\nBacktrace:\n" . $backtrace;
+          }
+          // WordPress's error_log() already adds a timestamp, so we don't include one here
+          $log_message = sprintf(
+            "HTTP request failed: %s (URL: %s) (Request URI: %s)%s",
+            $error_message,
+            $url,
+            $request_uri,
+            $backtrace_text
+          );
+          error_log($log_message);
+        }
     }
   }
 }, 10, 5);
@@ -779,9 +797,9 @@ function big_mistake_shutdown_handler() {
         break;
     }
 
+    // WordPress's error_log() already adds a timestamp, so we don't include one here
     $message = sprintf(
-      '[%s] PHP Fatal error (%s): %s in %s on line %d',
-      date('Y-m-d H:i:s'),
+      'PHP Fatal error (%s): %s in %s on line %d',
       $error_type,
       $error['message'],
       $error['file'],

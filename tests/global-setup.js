@@ -81,9 +81,9 @@ async function globalSetup() {
   // Write a marker to the debug log to indicate setup is complete and tests are about to start
   if (wpInstance.debugLogPath) {
     try {
-      const { writeFileSync, appendFileSync, existsSync } = await import('fs');
+      const { appendFileSync } = await import('fs');
       const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
-      const marker = `[${timestamp}] [Global Setup] WordPress setup complete - tests are about to start\n`;
+      const marker = `=== [${timestamp}] [Global Setup] Setup complete - tests starting\n`;
       appendFileSync(wpInstance.debugLogPath, marker);
       console.log('Global setup: Added marker to debug log');
     } catch (error) {
