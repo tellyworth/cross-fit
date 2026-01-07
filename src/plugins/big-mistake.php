@@ -347,23 +347,23 @@ add_action('http_api_debug', function($response, $context, $class, $args, $url) 
       $request_uri = isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : 'unknown';
 
       // Log backtrace to debug.log if WP_DEBUG_LOG is enabled
-        if (defined('WP_DEBUG_LOG') && WP_DEBUG_LOG) {
-          // Include backtrace only if WP_ENABLE_BACKTRACES is set (HTTP errors are warnings, not fatal)
-          $backtrace_text = '';
-          if (defined('WP_ENABLE_BACKTRACES') && WP_ENABLE_BACKTRACES) {
-            $backtrace = big_mistake_get_trimmed_backtrace(null, 15);
-            $backtrace_text = "\nBacktrace:\n" . $backtrace;
-          }
-          // WordPress's error_log() already adds a timestamp, so we don't include one here
-          $log_message = sprintf(
-            "HTTP request failed: %s (URL: %s) (Request URI: %s)%s",
-            $error_message,
-            $url,
-            $request_uri,
-            $backtrace_text
-          );
-          error_log($log_message);
+      if (defined('WP_DEBUG_LOG') && WP_DEBUG_LOG) {
+        // Include backtrace only if WP_ENABLE_BACKTRACES is set (HTTP errors are warnings, not fatal)
+        $backtrace_text = '';
+        if (defined('WP_ENABLE_BACKTRACES') && WP_ENABLE_BACKTRACES) {
+          $backtrace = big_mistake_get_trimmed_backtrace(null, 15);
+          $backtrace_text = "\nBacktrace:\n" . $backtrace;
         }
+        // WordPress's error_log() already adds a timestamp, so we don't include one here
+        $log_message = sprintf(
+          "HTTP request failed: %s (URL: %s) (Request URI: %s)%s",
+          $error_message,
+          $url,
+          $request_uri,
+          $backtrace_text
+        );
+        error_log($log_message);
+      }
     }
   }
 }, 10, 5);
