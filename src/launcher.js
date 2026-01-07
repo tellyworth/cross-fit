@@ -577,6 +577,8 @@ export async function launchWordPress() {
           WP_DEBUG: true,
           WP_DEBUG_DISPLAY: true,
           WP_DEBUG_LOG: debugLogVfsPath, // Explicit absolute path in VFS that maps to our temp dir
+          // Enable backtraces if WP_ENABLE_BACKTRACES env var is set
+          WP_ENABLE_BACKTRACES: process.env.WP_ENABLE_BACKTRACES === '1',
           // Disable automatic updates to avoid external requests
           AUTOMATIC_UPDATER_DISABLED: true,
           WP_AUTO_UPDATE_CORE: false,
@@ -603,8 +605,8 @@ if (!file_exists($log_dir)) {
 }
 
 // Write startup header to debug log
-$timestamp = date('Y-m-d H:i:s');
-$header = "WordPress Playground started at {$timestamp}" . PHP_EOL;
+$timestamp = gmdate('Y-m-d H:i:s') . ' UTC';
+$header = "=== [{$timestamp}] [WordPress Playground] Blueprint started" . PHP_EOL;
 file_put_contents($log_path, $header, FILE_APPEND | LOCK_EX);
 `,
       },

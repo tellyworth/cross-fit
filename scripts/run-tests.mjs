@@ -86,8 +86,14 @@ async function main() {
   }
 
   // Handle DEBUG flag
-  if (options.debug || process.env.DEBUG === '1') {
+  const hasDebugFlag = passthrough.includes('--debug') || options.debug || process.env.DEBUG === '1';
+  if (hasDebugFlag) {
     env.DEBUG = '1';
+    env.WP_ENABLE_BACKTRACES = '1';
+    // If --debug is set and --debug-log is not explicitly set, enable it with large limit
+    if (!options.debugLog && !options['debug-log']) {
+      env.WP_DEBUG_LOG_LINES = '10000';
+    }
     // Do not forward --debug to Playwright
   }
 
@@ -156,12 +162,13 @@ async function main() {
   }
 
   // Forward all other options to Playwright (e.g., --grep, --grep-invert, etc.)
-  // Filter out snapshot-related flags and upgrade-all from passthrough
+  // Filter out snapshot-related flags, upgrade-all, and debug from passthrough
   const forwardedArgs = passthrough.filter(arg =>
     arg !== '--capture' &&
     arg !== '--clear-snapshots' &&
     arg !== '--skip-snapshots' &&
-    arg !== '--upgrade-all'
+    arg !== '--upgrade-all' &&
+    arg !== '--debug'
   );
 
   if (hasCaptureFlag) {

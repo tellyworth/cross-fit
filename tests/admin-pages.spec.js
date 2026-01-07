@@ -92,20 +92,6 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
       return;
     }
 
-    // Calculate timeout for batched parallel execution:
-    // With batched parallel execution, we need time for: base + (number of batches * time per batch)
-    // Each batch processes items in parallel, taking ~20 seconds per batch
-    const baseTimeout = 30000; // Base 30 seconds
-    const timeoutPerItem = 20000; // 20 seconds per page (admin pages can be slow)
-    // Match the worker count to avoid overwhelming the system
-    // Playwright workers run tests in parallel, so we limit browser contexts per test accordingly
-    const concurrencyLimit = 4; // Process 4 items in parallel at a time (matches worker count)
-    const batches = Math.ceil(adminMenuItems.length / concurrencyLimit);
-    const timePerBatch = timeoutPerItem + 5000; // 20s per page + 5s overhead per batch
-    // Timeout = base + (batches * time per batch)
-    const estimatedTimeout = baseTimeout + (batches * timePerBatch);
-    test.setTimeout(estimatedTimeout);
-
     // Get browser from page context to create new contexts for parallel execution
     // Each context will have its own session/cookies, ensuring isolation
     const browserContext = page.context();
@@ -128,6 +114,34 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
         description: `Admin menu: ${menuItem.title} (${menuItem.slug})`,
       };
     });
+
+    // Exclude admin pages that trigger expected WordPress.org API connection errors
+    // These pages attempt to connect to api.wordpress.org for updates/plugin info,
+    // which will fail in the test environment and generate PHP warnings that are expected.
+    // Excluded pages:
+    // - /wp-admin/plugin-install.php: Attempts to fetch plugin information from WordPress.org
+    // - /wp-admin/update-core.php: Attempts to check for WordPress core updates
+    const excludedPaths = [
+      '/wp-admin/plugin-install.php',
+      '/wp-admin/update-core.php',
+    ];
+    const filteredMenuItemTests = menuItemTests.filter(
+      (item) => !excludedPaths.includes(item.path)
+    );
+
+    // Calculate timeout for batched parallel execution:
+    // With batched parallel execution, we need time for: base + (number of batches * time per batch)
+    // Each batch processes items in parallel, taking ~20 seconds per batch
+    const baseTimeout = 30000; // Base 30 seconds
+    const timeoutPerItem = 20000; // 20 seconds per page (admin pages can be slow)
+    // Match the worker count to avoid overwhelming the system
+    // Playwright workers run tests in parallel, so we limit browser contexts per test accordingly
+    const concurrencyLimit = 4; // Process 4 items in parallel at a time (matches worker count)
+    const batches = Math.ceil(filteredMenuItemTests.length / concurrencyLimit);
+    const timePerBatch = timeoutPerItem + 5000; // 20s per page + 5s overhead per batch
+    // Timeout = base + (batches * time per batch)
+    const estimatedTimeout = baseTimeout + (batches * timePerBatch);
+    test.setTimeout(estimatedTimeout);
 
     // Create a pool of reusable browser contexts to avoid the overhead of creating/closing contexts
     // This is much faster than creating a new context for each test
@@ -186,7 +200,7 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
     const startTime = Date.now();
 
     const menuResults = await processWithConcurrencyLimit(
-      menuItemTests,
+      filteredMenuItemTests,
       concurrencyLimit,
       async (menuItem) => {
         const itemStartTime = Date.now();
@@ -216,7 +230,7 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
     const failures = [];
     menuResults.forEach((result, index) => {
       if (result.status === 'rejected') {
-        const menuItem = menuItemTests[index];
+        const menuItem = filteredMenuItemTests[index];
         failures.push({
           menuItem: menuItem.title,
           slug: menuItem.slug,
@@ -246,12 +260,6 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
         const allSubmenuItems = await discoverAllAdminSubmenuItems(wpInstance, page);
 
           if (allSubmenuItems.length > 0) {
-          // For submenu items, we run them after menu items, so we need additional time
-          // Calculate batches for submenu items
-          const submenuBatches = Math.ceil(allSubmenuItems.length / concurrencyLimit);
-          const submenuTimeout = test.info().timeout + (submenuBatches * timePerBatch);
-          test.setTimeout(submenuTimeout);
-
           // Prepare submenu items for parallel testing
           const submenuItemTests = allSubmenuItems.map((submenuItem) => {
             const submenuUrl = new URL(submenuItem.url);
@@ -264,11 +272,23 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
             };
           });
 
+          // Exclude admin pages that trigger expected WordPress.org API connection errors
+          // (Same exclusions as for menu items - see above for documentation)
+          const filteredSubmenuItemTests = submenuItemTests.filter(
+            (item) => !excludedPaths.includes(item.path)
+          );
+
+          // For submenu items, we run them after menu items, so we need additional time
+          // Calculate batches for submenu items (using filtered count)
+          const submenuBatches = Math.ceil(filteredSubmenuItemTests.length / concurrencyLimit);
+          const submenuTimeout = test.info().timeout + (submenuBatches * timePerBatch);
+          test.setTimeout(submenuTimeout);
+
           // Test all submenu items with concurrency limiting using the same context pool
           const submenuStartTime = Date.now();
 
           const submenuResults = await processWithConcurrencyLimit(
-            submenuItemTests,
+            filteredSubmenuItemTests,
             concurrencyLimit,
             async (submenuItem) => {
               const itemStartTime = Date.now();
@@ -296,7 +316,7 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
           const submenuFailures = [];
           submenuResults.forEach((result, index) => {
             if (result.status === 'rejected') {
-              const submenuItem = submenuItemTests[index];
+              const submenuItem = filteredSubmenuItemTests[index];
               submenuFailures.push({
                 submenuItem: submenuItem.title,
                 slug: submenuItem.slug,
@@ -312,7 +332,7 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
           });
 
           if (submenuFailures.length > 0) {
-            console.warn(`\n[Admin Submenu Items] ${submenuFailures.length} of ${allSubmenuItems.length} items had issues:`);
+            console.warn(`\n[Admin Submenu Items] ${submenuFailures.length} of ${filteredSubmenuItemTests.length} items had issues:`);
             submenuFailures.forEach((failure) => {
               console.warn(`  - "${failure.submenuItem}" (${failure.slug}): ${failure.error}`);
             });
