@@ -1,7 +1,6 @@
 import { test, expect } from './wp-fixtures.js';
 import {
   testWordPressAdminPage,
-  discoverAllAdminSubmenuItems,
 } from './test-helpers.js';
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
@@ -41,67 +40,72 @@ function loadDiscoveryDataSync() {
 // Load discovery data at file load time (synchronous)
 const discoveryData = loadDiscoveryDataSync();
 
-// Prepare admin menu items for parameterized tests
-const adminMenuItemsToTest = discoveryData?.adminMenuItems
-  ? discoveryData.adminMenuItems
-      .map((menuItem) => {
-        const url = new URL(menuItem.url);
-        const path = url.pathname + url.search;
-        return {
-          path,
-          title: menuItem.title,
-          slug: menuItem.slug,
-          description: `Admin menu: ${menuItem.title} (${menuItem.slug})`,
-        };
-      })
-      .filter((item) => {
-        // Exclude admin pages that trigger expected WordPress.org API connection errors
-        const excludedPaths = [
-          '/wp-admin/plugin-install.php',
-          '/wp-admin/update-core.php',
-        ];
-        return !excludedPaths.includes(item.path);
-      })
-  : [];
+// Combine menu and submenu items into a single list for unified testing
+// Submenu items are only included in FULL_MODE
+function prepareAdminPagesToTest(discoveryData) {
+  const allPages = [];
 
-// Prepare admin submenu items for parameterized tests (only in full mode)
-const adminSubmenuItemsToTest = process.env.FULL_MODE === '1' && discoveryData?.adminSubmenuItems
-  ? discoveryData.adminSubmenuItems
-      .map((submenuItem) => {
-        const submenuUrl = new URL(submenuItem.url);
-        const submenuPath = submenuUrl.pathname + submenuUrl.search;
-        return {
-          path: submenuPath,
-          title: submenuItem.title,
-          slug: submenuItem.slug,
-          description: `Admin submenu: ${submenuItem.title} (${submenuItem.slug})`,
-        };
-      })
-      .filter((item) => {
-        const excludedPaths = [
-          '/wp-admin/plugin-install.php',
-          '/wp-admin/update-core.php',
-        ];
-        return !excludedPaths.includes(item.path);
-      })
-  : [];
+  // Add menu items
+  if (discoveryData?.adminMenuItems) {
+    for (const menuItem of discoveryData.adminMenuItems) {
+      const url = new URL(menuItem.url);
+      const path = url.pathname + url.search;
+      allPages.push({
+        path,
+        title: menuItem.title,
+        slug: menuItem.slug,
+        description: `Admin menu: ${menuItem.title} (${menuItem.slug})`,
+      });
+    }
+  }
+
+  // Add submenu items (only in full mode)
+  if (process.env.FULL_MODE === '1' && discoveryData?.adminSubmenuItems) {
+    for (const submenuItem of discoveryData.adminSubmenuItems) {
+      const submenuUrl = new URL(submenuItem.url);
+      const submenuPath = submenuUrl.pathname + submenuUrl.search;
+      allPages.push({
+        path: submenuPath,
+        title: submenuItem.title,
+        slug: submenuItem.slug,
+        description: `Admin submenu: ${submenuItem.title} (${submenuItem.slug})`,
+      });
+    }
+  }
+
+  // Filter out excluded pages
+  return allPages.filter((item) => {
+    // Exclude pages that trigger expected WordPress.org API connection errors
+    const apiErrorPaths = [
+      '/wp-admin/plugin-install.php',
+      '/wp-admin/update-core.php',
+    ];
+    if (apiErrorPaths.includes(item.path)) {
+      return false;
+    }
+
+    // Exclude pages that have explicit tests with additional coverage
+    // These pages are tested separately with more specific assertions
+    const explicitTestPaths = [
+      '/wp-admin/', // Tested by "should access authenticated admin dashboard"
+      '/wp-admin/options-general.php', // Tested by "should successfully submit POST request to change site options"
+    ];
+    if (explicitTestPaths.includes(item.path)) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
+const adminPagesToTest = prepareAdminPagesToTest(discoveryData);
 
 test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
 
+  // Explicit test for dashboard with smoke tag for quick validation
+  // This page is excluded from the discovery loop since it has explicit coverage
   test('should access authenticated admin dashboard', { tag: '@smoke' }, async ({ page, wpInstance }) => {
     await testWordPressAdminPage(page, wpInstance, '/wp-admin/');
-  });
-
-  test('should access multiple admin pages', async ({ page, wpInstance }) => {
-    // Test multiple admin pages
-    await testWordPressAdminPage(page, wpInstance, '/wp-admin/');
-    // Extend timeout after first page to allow for additional pages
-    test.setTimeout(test.info().timeout + 30000); // Add 30 seconds
-
-    await testWordPressAdminPage(page, wpInstance, '/wp-admin/options-general.php');
-    // Add more admin pages easily:
-    // await testWordPressAdminPage(page, wpInstance, '/wp-admin/edit.php');
-    // await testWordPressAdminPage(page, wpInstance, '/wp-admin/upload.php');
   });
 
   test('should successfully submit POST request to change site options', async ({ page, wpInstance }) => {
@@ -147,49 +151,26 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
     expect(savedStartOfWeek).toBe(newStartOfWeek);
   });
 
-  // Data provider pattern: Generate individual test() calls for each admin menu item
+  // Data provider pattern: Generate individual test() calls for all admin pages (menu + submenu)
   // Using Playwright's parameterized tests pattern: https://playwright.dev/docs/test-parameterize
   // Discovery file is read synchronously at file load time, allowing us to use forEach
-  test.describe('admin menu items', () => {
-    // Generate individual test() calls for each menu item using forEach
+  // Menu and submenu items are combined into a single list; submenu items are filtered by FULL_MODE
+  test.describe('admin pages (discovered)', () => {
+    // Generate individual test() calls for each page using forEach
     // This pattern creates separate test() calls that Playwright can run in parallel
     // Reference: https://playwright.dev/docs/test-parameterize
-    adminMenuItemsToTest.forEach((menuItem) => {
-      test(`admin menu: ${menuItem.title} (${menuItem.path})`, async ({ page, wpInstance }) => {
-        await testWordPressAdminPage(page, wpInstance, menuItem.path, {
-            description: menuItem.description,
+    adminPagesToTest.forEach((pageItem) => {
+      test(`admin page: ${pageItem.title} (${pageItem.path})`, async ({ page, wpInstance }) => {
+        await testWordPressAdminPage(page, wpInstance, pageItem.path, {
+          description: pageItem.description,
         });
       });
     });
 
     // Fallback test if no items were discovered
-    if (adminMenuItemsToTest.length === 0) {
-      test('should discover admin menu items', async ({ page, wpInstance }) => {
-        test.skip(true, 'No admin menu items discovered - discovery file may not have been generated');
-      });
-    }
-  });
-
-  // Data provider pattern for submenu items (only in full mode)
-  // Using Playwright's parameterized tests pattern: https://playwright.dev/docs/test-parameterize
-  test.describe('admin submenu items', () => {
-    // Generate individual test() calls for each submenu item using forEach
-    adminSubmenuItemsToTest.forEach((submenuItem) => {
-      test(`admin submenu: ${submenuItem.title} (${submenuItem.path})`, async ({ page, wpInstance }) => {
-        await testWordPressAdminPage(page, wpInstance, submenuItem.path, {
-                  description: submenuItem.description,
-        });
-      });
-    });
-
-    // Fallback test if not in full mode or no items discovered
-    if (process.env.FULL_MODE !== '1') {
-      test('submenu items test (full mode only)', async () => {
-        test.skip(true, 'Submenu items only tested in FULL_MODE=1');
-      });
-    } else if (adminSubmenuItemsToTest.length === 0) {
-      test('should discover admin submenu items', async ({ page, wpInstance }) => {
-        test.skip(true, 'No admin submenu items discovered - discovery file may not have been generated');
+    if (adminPagesToTest.length === 0) {
+      test('should discover admin pages', async ({ page, wpInstance }) => {
+        test.skip(true, 'No admin pages discovered - discovery file may not have been generated');
       });
     }
   });
