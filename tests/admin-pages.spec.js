@@ -3,10 +3,89 @@ import {
   testWordPressAdminPage,
   discoverAllAdminSubmenuItems,
 } from './test-helpers.js';
+import { readFileSync, existsSync } from 'fs';
+import { join, dirname } from 'path';
 
 /**
  * @fileoverview Tests for authenticated WordPress admin pages
  */
+
+// Read discovery file synchronously at file load time
+// This allows us to use Playwright's forEach pattern to generate individual test() calls
+// Reference: https://playwright.dev/docs/test-parameterize
+function loadDiscoveryDataSync() {
+  // Derive discovery file path from debug log path (both are in wp-content)
+  const debugLogPath = process.env.WP_PLAYGROUND_DEBUG_LOG;
+  if (!debugLogPath) {
+    console.warn('Warning: WP_PLAYGROUND_DEBUG_LOG not set, discovery file cannot be loaded synchronously');
+    return null;
+  }
+
+  // Discovery file is in the same directory as debug.log
+  const discoveryFilePath = join(dirname(debugLogPath), 'big-mistake-discovery.json');
+
+  if (!existsSync(discoveryFilePath)) {
+    console.warn(`Warning: Discovery file not found at ${discoveryFilePath}`);
+    return null;
+  }
+
+  try {
+    const fileContent = readFileSync(discoveryFilePath, 'utf8');
+    return JSON.parse(fileContent);
+  } catch (error) {
+    console.warn(`Warning: Failed to read or parse discovery file: ${error.message}`);
+    return null;
+  }
+}
+
+// Load discovery data at file load time (synchronous)
+const discoveryData = loadDiscoveryDataSync();
+
+// Prepare admin menu items for parameterized tests
+const adminMenuItemsToTest = discoveryData?.adminMenuItems
+  ? discoveryData.adminMenuItems
+      .map((menuItem) => {
+        const url = new URL(menuItem.url);
+        const path = url.pathname + url.search;
+        return {
+          path,
+          title: menuItem.title,
+          slug: menuItem.slug,
+          description: `Admin menu: ${menuItem.title} (${menuItem.slug})`,
+        };
+      })
+      .filter((item) => {
+        // Exclude admin pages that trigger expected WordPress.org API connection errors
+        const excludedPaths = [
+          '/wp-admin/plugin-install.php',
+          '/wp-admin/update-core.php',
+        ];
+        return !excludedPaths.includes(item.path);
+      })
+  : [];
+
+// Prepare admin submenu items for parameterized tests (only in full mode)
+const adminSubmenuItemsToTest = process.env.FULL_MODE === '1' && discoveryData?.adminSubmenuItems
+  ? discoveryData.adminSubmenuItems
+      .map((submenuItem) => {
+        const submenuUrl = new URL(submenuItem.url);
+        const submenuPath = submenuUrl.pathname + submenuUrl.search;
+        return {
+          path: submenuPath,
+          title: submenuItem.title,
+          slug: submenuItem.slug,
+          description: `Admin submenu: ${submenuItem.title} (${submenuItem.slug})`,
+        };
+      })
+      .filter((item) => {
+        const excludedPaths = [
+          '/wp-admin/plugin-install.php',
+          '/wp-admin/update-core.php',
+        ];
+        return !excludedPaths.includes(item.path);
+      })
+  : [];
+
 test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
 
   test('should access authenticated admin dashboard', { tag: '@smoke' }, async ({ page, wpInstance }) => {
@@ -68,279 +147,50 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
     expect(savedStartOfWeek).toBe(newStartOfWeek);
   });
 
-  test('should access all admin menu items without errors', async ({ page, wpInstance }) => {
-    // This test accesses multiple admin pages in parallel
-    // Set timeout based on number of items: base timeout + 15 seconds per item (parallel execution is faster)
-    const isFullMode = process.env.FULL_MODE === '1';
-
-    // Discover admin menu items lazily if not already cached
-    let adminMenuItems = wpInstance.discoveredData?.adminMenuItems;
-    if (!adminMenuItems || adminMenuItems.length === 0) {
-      const { discoverAdminMenuItems } = await import('./test-helpers.js');
-      adminMenuItems = await discoverAdminMenuItems(wpInstance, page);
-      // Cache for other tests
-      if (global.wpDiscoveredData) {
-        global.wpDiscoveredData.adminMenuItems = adminMenuItems;
-      }
-      if (wpInstance.discoveredData) {
-        wpInstance.discoveredData.adminMenuItems = adminMenuItems;
-      }
-    }
-
-    if (adminMenuItems.length === 0) {
-      test.skip(true, 'No admin menu items discovered');
-      return;
-    }
-
-    // Get browser from page context to create new contexts for parallel execution
-    // Each context will have its own session/cookies, ensuring isolation
-    const browserContext = page.context();
-    const browser = browserContext.browser();
-    if (!browser) {
-      throw new Error('Could not access browser from page context');
-    }
-
-    // Get storage state once for reuse across all contexts
-    const storageState = await browserContext.storageState();
-
-    // Prepare menu items for parallel testing
-    const menuItemTests = adminMenuItems.map((menuItem) => {
-      const url = new URL(menuItem.url);
-      const path = url.pathname + url.search;
-      return {
-        path,
-        title: menuItem.title,
-        slug: menuItem.slug,
-        description: `Admin menu: ${menuItem.title} (${menuItem.slug})`,
-      };
-    });
-
-    // Exclude admin pages that trigger expected WordPress.org API connection errors
-    // These pages attempt to connect to api.wordpress.org for updates/plugin info,
-    // which will fail in the test environment and generate PHP warnings that are expected.
-    // Excluded pages:
-    // - /wp-admin/plugin-install.php: Attempts to fetch plugin information from WordPress.org
-    // - /wp-admin/update-core.php: Attempts to check for WordPress core updates
-    const excludedPaths = [
-      '/wp-admin/plugin-install.php',
-      '/wp-admin/update-core.php',
-    ];
-    const filteredMenuItemTests = menuItemTests.filter(
-      (item) => !excludedPaths.includes(item.path)
-    );
-
-    // Calculate timeout for batched parallel execution:
-    // With batched parallel execution, we need time for: base + (number of batches * time per batch)
-    // Each batch processes items in parallel, taking ~20 seconds per batch
-    const baseTimeout = 30000; // Base 30 seconds
-    const timeoutPerItem = 20000; // 20 seconds per page (admin pages can be slow)
-    // Match the worker count to avoid overwhelming the system
-    // Playwright workers run tests in parallel, so we limit browser contexts per test accordingly
-    const concurrencyLimit = 4; // Process 4 items in parallel at a time (matches worker count)
-    const batches = Math.ceil(filteredMenuItemTests.length / concurrencyLimit);
-    const timePerBatch = timeoutPerItem + 5000; // 20s per page + 5s overhead per batch
-    // Timeout = base + (batches * time per batch)
-    const estimatedTimeout = baseTimeout + (batches * timePerBatch);
-    test.setTimeout(estimatedTimeout);
-
-    // Create a pool of reusable browser contexts to avoid the overhead of creating/closing contexts
-    // This is much faster than creating a new context for each test
-    const contextPool = [];
-    const poolSize = concurrencyLimit; // Match worker count
-
-    // Initialize context pool
-    for (let i = 0; i < poolSize; i++) {
-      const context = await browser.newContext({
-        storageState: storageState,
-      });
-      contextPool.push(context);
-    }
-
-    // Helper to get a context from the pool (round-robin)
-    let contextIndex = 0;
-    function getContext() {
-      const context = contextPool[contextIndex % poolSize];
-      contextIndex++;
-      return context;
-    }
-
-    // Process items with true concurrency limiting (not batching)
-    // This starts new tasks as soon as a slot becomes available, rather than waiting for entire batches
-    async function processWithConcurrencyLimit(items, concurrency, processor) {
-      const results = [];
-      const executing = new Set();
-      let index = 0;
-
-      while (index < items.length || executing.size > 0) {
-        // Start new tasks up to the concurrency limit
-        while (executing.size < concurrency && index < items.length) {
-          const item = items[index++];
-          const promise = Promise.resolve(processor(item))
-            .then(
-              (value) => ({ status: 'fulfilled', value }),
-              (reason) => ({ status: 'rejected', reason })
-            )
-            .finally(() => {
-              executing.delete(promise);
-            });
-          executing.add(promise);
-        }
-
-        // Wait for at least one task to complete
-        if (executing.size > 0) {
-          const result = await Promise.race(Array.from(executing));
-          results.push(result);
-        }
-      }
-
-      return results;
-    }
-
-    // Process menu items with concurrency limiting using the context pool
-    const startTime = Date.now();
-
-    const menuResults = await processWithConcurrencyLimit(
-      filteredMenuItemTests,
-      concurrencyLimit,
-      async (menuItem) => {
-        const itemStartTime = Date.now();
-        const context = getContext();
-        const testPage = await context.newPage();
-
-        try {
-          await testWordPressAdminPage(testPage, wpInstance, menuItem.path, {
+  // Data provider pattern: Generate individual test() calls for each admin menu item
+  // Using Playwright's parameterized tests pattern: https://playwright.dev/docs/test-parameterize
+  // Discovery file is read synchronously at file load time, allowing us to use forEach
+  test.describe('admin menu items', () => {
+    // Generate individual test() calls for each menu item using forEach
+    // This pattern creates separate test() calls that Playwright can run in parallel
+    // Reference: https://playwright.dev/docs/test-parameterize
+    adminMenuItemsToTest.forEach((menuItem) => {
+      test(`admin menu: ${menuItem.title} (${menuItem.path})`, async ({ page, wpInstance }) => {
+        await testWordPressAdminPage(page, wpInstance, menuItem.path, {
             description: menuItem.description,
-            timeout: 20000, // 20 seconds per page
-          });
-          return { success: true, menuItem };
-        } catch (error) {
-          return { success: false, menuItem, error: error.message };
-        } finally {
-          await testPage.close();
-        }
-      }
-    );
-
-    // Clean up context pool (but keep contexts open for submenu items if in full mode)
-    if (!isFullMode) {
-      await Promise.all(contextPool.map(ctx => ctx.close()));
-    }
-
-    // Process results and report failures
-    const failures = [];
-    menuResults.forEach((result, index) => {
-      if (result.status === 'rejected') {
-        const menuItem = filteredMenuItemTests[index];
-        failures.push({
-          menuItem: menuItem.title,
-          slug: menuItem.slug,
-          error: result.reason?.message || String(result.reason),
         });
-      } else if (result.value && !result.value.success) {
-        failures.push({
-          menuItem: result.value.menuItem.title,
-          slug: result.value.menuItem.slug,
-          error: result.value.error,
-        });
-      }
+      });
     });
 
-    // Log warnings for failures but don't fail the test (similar to original behavior)
-    if (failures.length > 0) {
-      console.warn(`\n[Admin Menu Items] ${failures.length} of ${adminMenuItems.length} items had issues:`);
-      failures.forEach((failure) => {
-        console.warn(`  - "${failure.menuItem}" (${failure.slug}): ${failure.error}`);
+    // Fallback test if no items were discovered
+    if (adminMenuItemsToTest.length === 0) {
+      test('should discover admin menu items', async ({ page, wpInstance }) => {
+        test.skip(true, 'No admin menu items discovered - discovery file may not have been generated');
       });
     }
+  });
 
-    // In full mode, also test all submenu items in parallel
-    if (isFullMode) {
-      try {
-        // Fetch all submenu items once (using original page)
-        const allSubmenuItems = await discoverAllAdminSubmenuItems(wpInstance, page);
-
-          if (allSubmenuItems.length > 0) {
-          // Prepare submenu items for parallel testing
-          const submenuItemTests = allSubmenuItems.map((submenuItem) => {
-            const submenuUrl = new URL(submenuItem.url);
-            const submenuPath = submenuUrl.pathname + submenuUrl.search;
-            return {
-              path: submenuPath,
-              title: submenuItem.title,
-              slug: submenuItem.slug,
-              description: `Admin submenu: ${submenuItem.title} (${submenuItem.slug})`,
-            };
-          });
-
-          // Exclude admin pages that trigger expected WordPress.org API connection errors
-          // (Same exclusions as for menu items - see above for documentation)
-          const filteredSubmenuItemTests = submenuItemTests.filter(
-            (item) => !excludedPaths.includes(item.path)
-          );
-
-          // For submenu items, we run them after menu items, so we need additional time
-          // Calculate batches for submenu items (using filtered count)
-          const submenuBatches = Math.ceil(filteredSubmenuItemTests.length / concurrencyLimit);
-          const submenuTimeout = test.info().timeout + (submenuBatches * timePerBatch);
-          test.setTimeout(submenuTimeout);
-
-          // Test all submenu items with concurrency limiting using the same context pool
-          const submenuStartTime = Date.now();
-
-          const submenuResults = await processWithConcurrencyLimit(
-            filteredSubmenuItemTests,
-            concurrencyLimit,
-            async (submenuItem) => {
-              const itemStartTime = Date.now();
-              const context = getContext();
-              const testPage = await context.newPage();
-
-              try {
-                await testWordPressAdminPage(testPage, wpInstance, submenuItem.path, {
+  // Data provider pattern for submenu items (only in full mode)
+  // Using Playwright's parameterized tests pattern: https://playwright.dev/docs/test-parameterize
+  test.describe('admin submenu items', () => {
+    // Generate individual test() calls for each submenu item using forEach
+    adminSubmenuItemsToTest.forEach((submenuItem) => {
+      test(`admin submenu: ${submenuItem.title} (${submenuItem.path})`, async ({ page, wpInstance }) => {
+        await testWordPressAdminPage(page, wpInstance, submenuItem.path, {
                   description: submenuItem.description,
-                  timeout: 20000,
-                });
-                return { success: true, submenuItem };
-              } catch (error) {
-                return { success: false, submenuItem, error: error.message };
-              } finally {
-                await testPage.close();
-              }
-            }
-          );
+        });
+      });
+    });
 
-          // Clean up context pool after submenu items
-          await Promise.all(contextPool.map(ctx => ctx.close()));
-
-          // Process submenu results
-          const submenuFailures = [];
-          submenuResults.forEach((result, index) => {
-            if (result.status === 'rejected') {
-              const submenuItem = filteredSubmenuItemTests[index];
-              submenuFailures.push({
-                submenuItem: submenuItem.title,
-                slug: submenuItem.slug,
-                error: result.reason?.message || String(result.reason),
-              });
-            } else if (result.value && !result.value.success) {
-              submenuFailures.push({
-                submenuItem: result.value.submenuItem.title,
-                slug: result.value.submenuItem.slug,
-                error: result.value.error,
-              });
-            }
-          });
-
-          if (submenuFailures.length > 0) {
-            console.warn(`\n[Admin Submenu Items] ${submenuFailures.length} of ${filteredSubmenuItemTests.length} items had issues:`);
-            submenuFailures.forEach((failure) => {
-              console.warn(`  - "${failure.submenuItem}" (${failure.slug}): ${failure.error}`);
-            });
-          }
-        }
-      } catch (error) {
-        console.warn(`Warning: Could not discover submenu items:`, error.message);
-      }
+    // Fallback test if not in full mode or no items discovered
+    if (process.env.FULL_MODE !== '1') {
+      test('submenu items test (full mode only)', async () => {
+        test.skip(true, 'Submenu items only tested in FULL_MODE=1');
+      });
+    } else if (adminSubmenuItemsToTest.length === 0) {
+      test('should discover admin submenu items', async ({ page, wpInstance }) => {
+        test.skip(true, 'No admin submenu items discovered - discovery file may not have been generated');
+      });
     }
   });
 });

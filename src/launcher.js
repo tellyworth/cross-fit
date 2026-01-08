@@ -644,6 +644,34 @@ file_put_contents($log_path, $header, FILE_APPEND | LOCK_EX);
       allSteps.push(...userBlueprint.steps);
     }
 
+    // Add final step to generate discovery file synchronously
+    // This ensures the discovery file exists before any tests run, allowing us to read it
+    // synchronously in test files and use Playwright's forEach pattern for individual test() calls
+    // Reference: https://playwright.dev/docs/test-parameterize
+    allSteps.push({
+      step: 'runPHP',
+      code: `<?php
+require_once '/wordpress/wp-load.php';
+
+// Ensure the big-mistake plugin functions are available
+// The plugin is installed as a must-use plugin, so it should be loaded
+if (function_exists('big_mistake_write_discovery_file')) {
+  big_mistake_write_discovery_file();
+} else {
+  // Fallback: if function doesn't exist, try to call it directly
+  // This handles the case where the plugin hasn't been loaded yet
+  $file_path = WP_CONTENT_DIR . '/big-mistake-discovery.json';
+  if (function_exists('big_mistake_get_discovery_data_array')) {
+    $data = big_mistake_get_discovery_data_array();
+    $json = wp_json_encode($data, JSON_PRETTY_PRINT);
+    if ($json !== false) {
+      file_put_contents($file_path, $json);
+    }
+  }
+}
+`,
+    });
+
     const finalBlueprint = { steps: allSteps };
 
     // Get WordPress version from environment variable, default to 'latest'

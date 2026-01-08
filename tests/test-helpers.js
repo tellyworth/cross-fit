@@ -272,6 +272,16 @@ function detectErrorType(errorText) {
  * @param {boolean} options.allowPHPErrors - Allow PHP errors (default: false)
  * @param {string} options.description - Description for test.step (optional)
  */
+/**
+ * Test WordPress public page
+ * This is a convenience wrapper that calls all the composable steps in order.
+ * For more control, use the individual step functions directly.
+ *
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @param {Object} wpInstance - WordPress instance with url property
+ * @param {string} path - Relative path to page (e.g., '/')
+ * @param {Object} options - Optional test options
+ */
 export async function testWordPressPage(page, wpInstance, path, options = {}) {
   const url = normalizePath(wpInstance.url, path);
   const {
@@ -282,105 +292,52 @@ export async function testWordPressPage(page, wpInstance, path, options = {}) {
     allowPageErrors = false,
     allowPHPErrors = false,
     description = null,
-    waitUntil = 'load', // Allow override for tests that need networkidle
+    waitUntil = 'load',
   } = options;
 
-  // Track errors - set up listeners before navigation
-  const consoleErrors = [];
-  const pageErrors = [];
+  // Step 1: Set up error tracking
+  const errorTracking = setupErrorTracking(page);
 
-  // Store listener functions so we can remove them later
-  const consoleListener = (msg) => {
-    if (msg.type() === 'error') {
-      consoleErrors.push({
-        text: msg.text(),
-        location: msg.location(),
-      });
-    }
-  };
+  try {
+    // Step 2: Navigate to page
+    const response = await navigateToPage(page, url, waitUntil);
+    expect(response.status()).toBe(expectedStatus);
 
-  const pageErrorListener = (error) => {
-    pageErrors.push({
-      message: error.message,
-      stack: error.stack,
-    });
-  };
+    // Step 3: Get page content and detect PHP errors
+    const { pageContent, phpErrors } = await getPageContentAndPHPErrors(page);
 
-  page.on('console', consoleListener);
-  page.on('pageerror', pageErrorListener);
+    // Step 4: Validate page title (if specified)
+    await validatePageTitle(page, expectedTitle);
 
-  // Navigate and check response
-  // Use 'load' by default for faster tests (networkidle waits 500ms for no activity)
-  // Some tests may need 'networkidle' to capture errors that occur during network activity
-  const response = await page.goto(url, { waitUntil });
+    // Step 5: Validate body class (if specified)
+    await validateBodyClass(page, expectedBodyClass);
 
-  expect(response.status()).toBe(expectedStatus);
+    // Step 6: Check for PHP errors
+    checkForPHPErrorsPublic(phpErrors, allowPHPErrors);
 
-  // Detect PHP errors in page content (when WP_DEBUG_DISPLAY is enabled)
-  const pageContent = await page.content();
-  const phpErrors = detectPHPErrors(pageContent);
+    // Step 7: Check for JavaScript errors
+    checkForJavaScriptErrorsPublic(
+      errorTracking.consoleErrors,
+      errorTracking.pageErrors,
+      allowConsoleErrors,
+      allowPageErrors
+    );
 
-  // Validate title if specified
-  if (expectedTitle) {
-    const title = await page.title();
-    if (typeof expectedTitle === 'string') {
-      expect(title).toContain(expectedTitle);
-    } else {
-      expect(title).toMatch(expectedTitle);
-    }
+    // Step 8: Compare screenshot if needed
+    await compareScreenshotPublic(page, path, pageContent, allowPHPErrors);
+
+    return {
+      response,
+      consoleErrors: errorTracking.consoleErrors,
+      pageErrors: errorTracking.pageErrors,
+      phpErrors,
+      title: await page.title(),
+      bodyClasses: await page.evaluate(() => document.body.className),
+    };
+  } finally {
+    // Cleanup error tracking listeners
+    errorTracking.cleanup();
   }
-
-  // Validate body class if specified
-  if (expectedBodyClass) {
-    const bodyClasses = await page.evaluate(() => document.body.className);
-    if (typeof expectedBodyClass === 'string') {
-      expect(bodyClasses).toContain(expectedBodyClass);
-    } else {
-      expect(bodyClasses).toMatch(expectedBodyClass);
-    }
-  }
-
-  // Check for errors (unless explicitly allowed)
-  if (!allowConsoleErrors) {
-    expect(consoleErrors).toHaveLength(0);
-  }
-
-  if (!allowPageErrors) {
-    expect(pageErrors).toHaveLength(0);
-  }
-
-  // Check for PHP errors (unless explicitly allowed via options)
-  if (!allowPHPErrors && phpErrors.length > 0) {
-    console.error('\n[PHP Errors Detected]');
-    phpErrors.forEach((err, i) => {
-      console.error(`  ${i + 1}. ${err.type.toUpperCase()}: ${err.message}`);
-      if (err.file) {
-        console.error(`     File: ${err.file}${err.line ? `:${err.line}` : ''}`);
-      }
-    });
-    expect(phpErrors).toHaveLength(0);
-  }
-
-  // Remove event listeners to prevent memory leaks
-  page.off('console', consoleListener);
-  page.off('pageerror', pageErrorListener);
-
-  // Visual baseline comparison using Playwright's built-in screenshot comparison
-  // Skip screenshot comparison if PHP errors are allowed (they change page layout)
-  if (process.env.SKIP_SNAPSHOTS !== '1' && !allowPHPErrors) {
-    const snapshotName = pathToSnapshotName(path);
-    await compareScreenshot(page, path, snapshotName, { waitForStabilization: false });
-  }
-
-  // Return test results for additional assertions if needed
-  return {
-    response,
-    consoleErrors,
-    pageErrors,
-    phpErrors,
-    title: await page.title(),
-    bodyClasses: await page.evaluate(() => document.body.className),
-  };
 }
 
 /**
@@ -1203,31 +1160,19 @@ export async function testWordPressRSSFeed(page, wpInstance, path, options = {})
 }
 
 /**
- * Test authenticated WordPress admin page
- *
- * @param {import('@playwright/test').Page} page - Playwright page object
- * @param {Object} wpInstance - WordPress instance with url property
- * @param {string} path - Relative path to admin page (e.g., '/wp-admin/')
- * @param {Object} options - Optional test options
+ * Composable test steps for WordPress admin pages
+ * These steps can be used individually or together via testWordPressAdminPage()
  */
-export async function testWordPressAdminPage(page, wpInstance, path, options = {}) {
-  const url = normalizePath(wpInstance.url, path);
-  const {
-    allowConsoleErrors = false,
-    allowPageErrors = false,
-    allowPHPErrors = false,
-  } = options;
 
-  // Check if page is already closed
-  if (page.isClosed()) {
-    throw new Error('Page was closed before navigation');
-  }
-
-  // Track errors - set up listeners before navigation
+/**
+ * Step 1: Set up error tracking listeners for console and page errors
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @returns {Object} Tracking object with { consoleErrors, pageErrors, cleanup }
+ */
+export function setupErrorTracking(page) {
   const consoleErrors = [];
   const pageErrors = [];
 
-  // Store listener functions so we can remove them later
   const consoleListener = (msg) => {
     if (msg.type() === 'error') {
       consoleErrors.push({
@@ -1247,54 +1192,59 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
   page.on('console', consoleListener);
   page.on('pageerror', pageErrorListener);
 
-  // For admin pages, use 'commit' to start navigation quickly, then wait for elements
-  // Admin pages have heavy JS that can delay DOMContentLoaded indefinitely
-  // We wait for actual UI elements instead of DOMContentLoaded
-  let response;
-  /**
-   * Helper to navigate with retry logic.
-   * @param {object} page - Playwright page object
-   * @param {string} url - URL to navigate to
-   * @param {number} [retryDelayMs=500] - Delay before retrying navigation (default: 500ms, empirically chosen for WP admin JS load)
-   * @returns {Promise<Response>} - Playwright Response object
-   */
-  async function navigateWithRetry(page, url, retryDelayMs = 500, navigationTimeout = 30000) {
-    try {
-      // Use 'commit' which waits for navigation to start (much faster)
-      return await page.goto(url, { waitUntil: 'commit', timeout: navigationTimeout });
-    } catch (e) {
+  return {
+    consoleErrors,
+    pageErrors,
+    cleanup: () => {
+      page.off('console', consoleListener);
+      page.off('pageerror', pageErrorListener);
+    },
+  };
+}
+
+/**
+ * Step 2: Navigate to admin page with retry logic
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @param {string} url - Full URL to navigate to
+ * @param {number} [retryDelayMs=500] - Delay before retrying navigation
+ * @param {number} [navigationTimeout=30000] - Navigation timeout
+ * @returns {Promise<import('@playwright/test').Response>} Response object
+ */
+export async function navigateToAdminPage(page, url, retryDelayMs = 500, navigationTimeout = 30000) {
+  if (page.isClosed()) {
+    throw new Error('Page was closed before navigation');
+  }
+
+  try {
+    return await page.goto(url, { waitUntil: 'commit', timeout: navigationTimeout });
+  } catch (e) {
+    if (page.isClosed()) {
+      throw new Error('Page was closed during navigation');
+    }
+    if (String(e.message || '').includes('ERR_ABORTED') || String(e.message || '').includes('Target page')) {
+      await page.waitForTimeout(retryDelayMs);
       if (page.isClosed()) {
-        throw new Error('Page was closed during navigation');
+        throw new Error('Page was closed after navigation error');
       }
-      if (String(e.message || '').includes('ERR_ABORTED') || String(e.message || '').includes('Target page')) {
-        // Wait a bit and retry
-        await page.waitForTimeout(retryDelayMs);
+      try {
+        return await page.goto(url, { waitUntil: 'commit', timeout: navigationTimeout });
+      } catch (retryError) {
         if (page.isClosed()) {
-          throw new Error('Page was closed after navigation error');
+          throw new Error('Page was closed during retry navigation');
         }
-        try {
-          return await page.goto(url, { waitUntil: 'commit', timeout: navigationTimeout });
-        } catch (retryError) {
-          if (page.isClosed()) {
-            throw new Error('Page was closed during retry navigation');
-          }
-          throw retryError;
-        }
-      } else {
-        throw e;
+        throw retryError;
       }
+    } else {
+      throw e;
     }
   }
+}
 
-  // Use helper with default retry delay (configurable)
-  response = await navigateWithRetry(page, url);
-  if (response) {
-    expect(response.status()).toBe(200);
-  }
-
-  // Wait for admin UI elements to confirm page is ready
-  // This is more reliable than waiting for DOMContentLoaded since admin JS is heavy
-  // External dashboard feed widgets are disabled via plugin to prevent server-side timeouts
+/**
+ * Step 3: Wait for admin UI elements to appear
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ */
+export async function waitForAdminUI(page) {
   await Promise.race([
     page.waitForSelector('#wpadminbar', { timeout: 5000 }),
     page.waitForSelector('#adminmenumain', { timeout: 5000 }),
@@ -1303,39 +1253,42 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
   ]).catch(() => {
     // If none found, continue - we'll check below
   });
+}
 
-  // Wait for JavaScript to execute and potentially hide "JavaScript required" notices
-  // WordPress shows these notices server-side but hides them with JavaScript
-  // Use a smart polling approach: check if hide-if-js elements are actually hidden
-  // This is faster than a fixed timeout and more reliable
+/**
+ * Step 4: Wait for JavaScript to be ready (hide hide-if-js elements)
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ */
+export async function waitForJavaScriptReady(page) {
   try {
     await page.waitForFunction(
       () => {
-        // Check if WordPress admin JS is loaded (jQuery or wp object)
         const jsLoaded = typeof jQuery !== 'undefined' || typeof wp !== 'undefined';
         if (!jsLoaded) {
-          return false; // Keep waiting
+          return false;
         }
-
-        // Check if any hide-if-js elements are still visible
         const hideIfJsElements = Array.from(document.querySelectorAll('.hide-if-js'));
         const visibleCount = hideIfJsElements.filter(el => {
           const style = window.getComputedStyle(el);
           return style.display !== 'none' && !el.classList.contains('hidden');
         }).length;
-
-        // JS is loaded and all hide-if-js elements are hidden (or none exist)
         return visibleCount === 0;
       },
-      { timeout: 2000 } // Max 2 seconds, but usually much faster
+      { timeout: 2000 }
     ).catch(() => {
-      // If timeout, continue anyway - JS may not have hidden them yet but we filter them in detection
+      // Continue if timeout - we'll filter notices in detection anyway
     });
   } catch (err) {
-    // Continue if wait fails - we'll filter notices in detection anyway
+    // Continue if wait fails
   }
+}
 
-  // Detect PHP errors in page content (when WP_DEBUG_DISPLAY is enabled)
+/**
+ * Step 5: Get page content and detect PHP errors
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @returns {Promise<Object>} Object with { pageContent, phpErrors }
+ */
+export async function getPageContentAndPHPErrors(page) {
   let phpErrors = [];
   let pageContent = null;
   try {
@@ -1344,12 +1297,18 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
       phpErrors = detectPHPErrors(pageContent);
     }
   } catch (err) {
-    // frame may have been replaced; log error for debugging
     console.warn('Error while getting page content or detecting PHP errors:', err);
   }
+  return { pageContent, phpErrors };
+}
 
-  // Check for admin-specific elements
-  const adminCheck = await page.evaluate(() => {
+/**
+ * Step 6: Check for admin chrome elements (admin bar, menu, etc.)
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @returns {Promise<Object>} Object with admin check results
+ */
+export async function checkAdminChrome(page) {
+  return await page.evaluate(() => {
     return {
       hasAdminBody: document.body?.classList?.contains('wp-admin') || false,
       hasAdminBar: !!document.querySelector('#wpadminbar'),
@@ -1357,21 +1316,27 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
       hasWpBodyContent: !!document.querySelector('#wpbody-content'),
     };
   });
+}
 
-  // Check if redirected to login (would mean authentication failed)
+/**
+ * Step 7: Check authentication (ensure not redirected to login)
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @param {string} path - Page path for error context
+ */
+export async function checkAuthentication(page, path) {
   const currentUrl = page.url();
   const isLoginPage = currentUrl.includes('/wp-login.php');
-
   expect(isLoginPage).toBe(false);
-  expect(
-    adminCheck.hasAdminBody ||
-    adminCheck.hasAdminBar ||
-    adminCheck.hasAdminMenu ||
-    adminCheck.hasWpBodyContent
-  ).toBe(true);
+}
 
-  // Check for PHP errors (unless explicitly allowed)
-  if (!allowPHPErrors && phpErrors.length > 0) {
+/**
+ * Step 8: Check for PHP errors in page content
+ * @param {Array} phpErrors - Array of detected PHP errors
+ * @param {boolean} allowErrors - Whether to allow PHP errors
+ * @param {string} path - Page path for error context
+ */
+export function checkForPHPErrors(phpErrors, allowErrors, path) {
+  if (!allowErrors && phpErrors.length > 0) {
     console.error('\n[PHP Errors Detected in Admin Page]');
     phpErrors.forEach((err, i) => {
       console.error(`  ${i + 1}. ${err.type.toUpperCase()}: ${err.message}`);
@@ -1381,8 +1346,17 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
     });
     expect(phpErrors).toHaveLength(0);
   }
+}
 
-  // Check for JavaScript console errors (unless explicitly allowed)
+/**
+ * Step 9: Check for JavaScript errors (console and page errors)
+ * @param {Array} consoleErrors - Array of console errors
+ * @param {Array} pageErrors - Array of page errors
+ * @param {boolean} allowConsoleErrors - Whether to allow console errors
+ * @param {boolean} allowPageErrors - Whether to allow page errors
+ * @param {string} path - Page path for error context
+ */
+export function checkForJavaScriptErrors(consoleErrors, pageErrors, allowConsoleErrors, allowPageErrors, path) {
   if (!allowConsoleErrors && consoleErrors.length > 0) {
     console.error(`\n[JavaScript Console Errors Detected in Admin Page] (${path})`);
     consoleErrors.forEach((err, i) => {
@@ -1394,7 +1368,6 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
     expect(consoleErrors).toHaveLength(0);
   }
 
-  // Check for JavaScript page errors (unless explicitly allowed)
   if (!allowPageErrors && pageErrors.length > 0) {
     console.error(`\n[JavaScript Page Errors Detected in Admin Page] (${path})`);
     pageErrors.forEach((err, i) => {
@@ -1405,17 +1378,20 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
     });
     expect(pageErrors).toHaveLength(0);
   }
+}
 
-  // Check for WordPress dashboard notices
+/**
+ * Step 10: Check for WordPress dashboard notices
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @param {string} path - Page path for whitelist matching
+ * @returns {Promise<Array>} Array of dashboard notices
+ */
+export async function checkDashboardNotices(page, path) {
   let dashboardNotices = [];
   try {
     if (!page.isClosed()) {
       dashboardNotices = await page.evaluate(() => {
         const notices = [];
-
-        // Find all WordPress admin notices
-        // WordPress uses .notice-error, .notice-warning, .notice-info, .notice-success
-        // They can be .notice.notice-error or just .notice-error
         const noticeSelectors = [
           '.notice-error',
           '.notice-warning',
@@ -1430,8 +1406,6 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
         noticeSelectors.forEach(selector => {
           const elements = document.querySelectorAll(selector);
           elements.forEach(el => {
-            // Check if element is actually visible (not hidden by CSS)
-            // WordPress uses .hide-if-js class which is hidden by CSS when JS is enabled
             const style = window.getComputedStyle(el);
             const display = style.display;
             const visibility = style.visibility;
@@ -1443,18 +1417,15 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
                              !hasHiddenClass &&
                              opacity !== '0';
 
-            // Skip elements that are hidden by CSS (like .hide-if-js when JS is enabled)
             if (!isVisible) {
               return;
             }
 
-            // Get the notice text, excluding dismiss buttons
             const text = el.innerText.trim();
             const dismissButton = el.querySelector('.notice-dismiss');
             const noticeText = dismissButton ? text.replace(dismissButton.innerText, '').trim() : text;
 
             if (noticeText) {
-              // Determine notice type from classes
               let type = 'unknown';
               if (el.classList.contains('notice-error')) {
                 type = 'error';
@@ -1466,15 +1437,11 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
                 type = 'success';
               }
 
-              notices.push({
-                type,
-                text: noticeText,
-              });
+              notices.push({ type, text: noticeText });
             }
           });
         });
 
-        // Remove duplicates (same text and type)
         const uniqueNotices = [];
         const seen = new Set();
         notices.forEach(notice => {
@@ -1492,7 +1459,7 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
     console.warn('Error while detecting dashboard notices:', err);
   }
 
-  // Page-specific notice whitelist - expected notices on specific pages
+  // Page-specific notice whitelist
   const noticeWhitelist = {
     '/wp-admin/theme-editor.php': [
       { type: 'warning', pattern: /minified version.*stylesheet/i },
@@ -1500,7 +1467,7 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
       { type: 'info', pattern: /[(]style[.]css[)]/i },
     ],
     '/wp-admin/plugin-editor.php': [
-      { type: 'info', pattern: /\.php$/i }, // Plugin filename notices (e.g., "akismet.php")
+      { type: 'info', pattern: /\.php$/i },
     ],
     '/wp-admin/post-new.php': [
       { type: 'error', pattern: /block editor requires JavaScript/i },
@@ -1510,24 +1477,19 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
     ],
   };
 
-  // Filter out whitelisted notices
   const filteredNotices = dashboardNotices.filter(notice => {
     const pageWhitelist = noticeWhitelist[path];
     if (!pageWhitelist) {
-      return true; // No whitelist for this page, keep all notices
+      return true;
     }
-
-    // Check if this notice matches any whitelist entry for this page
     const isWhitelisted = pageWhitelist.some(entry => {
       const typeMatches = entry.type === notice.type || entry.type === 'unknown';
       const patternMatches = entry.pattern.test(notice.text || '');
       return typeMatches && patternMatches;
     });
-
-    return !isWhitelisted; // Keep notices that are NOT whitelisted
+    return !isWhitelisted;
   });
 
-  // Assert no error notices (after filtering)
   const errorNotices = filteredNotices.filter(n => n.type === 'error');
   if (errorNotices.length > 0) {
     console.error(`\n[WordPress Dashboard Error Notices Detected] (${path})`);
@@ -1537,7 +1499,6 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
     expect(errorNotices).toHaveLength(0);
   }
 
-  // Warn on warning/info/other notices (but don't fail the test)
   const nonErrorNotices = filteredNotices.filter(n => n.type !== 'error');
   if (nonErrorNotices.length > 0) {
     console.warn(`\n[WordPress Dashboard Notices (non-error) Detected] (${path})`);
@@ -1547,38 +1508,201 @@ export async function testWordPressAdminPage(page, wpInstance, path, options = {
     });
   }
 
-  // Remove event listeners to prevent memory leaks
-  page.off('console', consoleListener);
-  page.off('pageerror', pageErrorListener);
+  return dashboardNotices;
+}
 
-  // Visual baseline comparison using Playwright's built-in screenshot comparison
+/**
+ * Step 11: Compare screenshot if needed
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @param {string} path - Page path
+ * @param {string} pageContent - Page HTML content
+ */
+export async function compareScreenshotIfNeeded(page, path, pageContent) {
   if (pageContent && !page.isClosed() && process.env.SKIP_SNAPSHOTS !== '1') {
     const snapshotName = pathToSnapshotName(path);
-    // Check if this path should be skipped before calling compareScreenshot
     if (SCREENSHOT_SKIP_PATHS.some(skipPath => path.includes(skipPath))) {
-      // Skip screenshot for this page - return early
-      return {
-        response,
-        adminCheck,
-        isAuthenticated: !isLoginPage,
-        phpErrors,
-        consoleErrors,
-        pageErrors,
-        dashboardNotices,
-      };
+      return;
     }
     await compareScreenshot(page, path, snapshotName, { waitForStabilization: true });
   }
+}
 
-  return {
-    response,
-    adminCheck,
-    isAuthenticated: !isLoginPage,
-    phpErrors,
-    consoleErrors,
-    pageErrors,
-    dashboardNotices,
-  };
+/**
+ * Composable test steps for WordPress public pages
+ */
+
+/**
+ * Navigate to a public WordPress page
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @param {string} url - Full URL to navigate to
+ * @param {string} [waitUntil='load'] - Playwright waitUntil option
+ * @returns {Promise<import('@playwright/test').Response>} Response object
+ */
+export async function navigateToPage(page, url, waitUntil = 'load') {
+  return await page.goto(url, { waitUntil });
+}
+
+/**
+ * Validate page title
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @param {string|RegExp} expectedTitle - Expected title (string or regex)
+ */
+export async function validatePageTitle(page, expectedTitle) {
+  if (!expectedTitle) return;
+  const title = await page.title();
+  if (typeof expectedTitle === 'string') {
+    expect(title).toContain(expectedTitle);
+  } else {
+    expect(title).toMatch(expectedTitle);
+  }
+}
+
+/**
+ * Validate body class
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @param {string|RegExp} expectedBodyClass - Expected body class (string or regex)
+ */
+export async function validateBodyClass(page, expectedBodyClass) {
+  if (!expectedBodyClass) return;
+  const bodyClasses = await page.evaluate(() => document.body.className);
+  if (typeof expectedBodyClass === 'string') {
+    expect(bodyClasses).toContain(expectedBodyClass);
+  } else {
+    expect(bodyClasses).toMatch(expectedBodyClass);
+  }
+}
+
+/**
+ * Check for PHP errors in public pages (simpler version without path context)
+ * @param {Array} phpErrors - Array of detected PHP errors
+ * @param {boolean} allowErrors - Whether to allow PHP errors
+ */
+export function checkForPHPErrorsPublic(phpErrors, allowErrors) {
+  if (!allowErrors && phpErrors.length > 0) {
+    console.error('\n[PHP Errors Detected]');
+    phpErrors.forEach((err, i) => {
+      console.error(`  ${i + 1}. ${err.type.toUpperCase()}: ${err.message}`);
+      if (err.file) {
+        console.error(`     File: ${err.file}${err.line ? `:${err.line}` : ''}`);
+      }
+    });
+    expect(phpErrors).toHaveLength(0);
+  }
+}
+
+/**
+ * Check for JavaScript errors in public pages (simpler version without path context)
+ * @param {Array} consoleErrors - Array of console errors
+ * @param {Array} pageErrors - Array of page errors
+ * @param {boolean} allowConsoleErrors - Whether to allow console errors
+ * @param {boolean} allowPageErrors - Whether to allow page errors
+ */
+export function checkForJavaScriptErrorsPublic(consoleErrors, pageErrors, allowConsoleErrors, allowPageErrors) {
+  if (!allowConsoleErrors && consoleErrors.length > 0) {
+    expect(consoleErrors).toHaveLength(0);
+  }
+  if (!allowPageErrors && pageErrors.length > 0) {
+    expect(pageErrors).toHaveLength(0);
+  }
+}
+
+/**
+ * Compare screenshot for public pages
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @param {string} path - Page path
+ * @param {string} pageContent - Page HTML content
+ * @param {boolean} allowPHPErrors - Whether PHP errors are allowed (skip screenshot if true)
+ */
+export async function compareScreenshotPublic(page, path, pageContent, allowPHPErrors) {
+  if (process.env.SKIP_SNAPSHOTS !== '1' && !allowPHPErrors) {
+    const snapshotName = pathToSnapshotName(path);
+    await compareScreenshot(page, path, snapshotName, { waitForStabilization: false });
+  }
+}
+
+/**
+ * Test authenticated WordPress admin page
+ * This is a convenience wrapper that calls all the composable steps in order.
+ * For more control, use the individual step functions directly.
+ *
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @param {Object} wpInstance - WordPress instance with url property
+ * @param {string} path - Relative path to admin page (e.g., '/wp-admin/')
+ * @param {Object} options - Optional test options
+ */
+export async function testWordPressAdminPage(page, wpInstance, path, options = {}) {
+  const url = normalizePath(wpInstance.url, path);
+  const {
+    allowConsoleErrors = false,
+    allowPageErrors = false,
+    allowPHPErrors = false,
+  } = options;
+
+  // Step 1: Set up error tracking
+  const errorTracking = setupErrorTracking(page);
+
+  try {
+    // Step 2: Navigate to admin page
+    const response = await navigateToAdminPage(page, url);
+    if (response) {
+      expect(response.status()).toBe(200);
+    }
+
+    // Step 3: Wait for admin UI elements
+    await waitForAdminUI(page);
+
+    // Step 4: Wait for JavaScript to be ready
+    await waitForJavaScriptReady(page);
+
+    // Step 5: Get page content and detect PHP errors
+    const { pageContent, phpErrors } = await getPageContentAndPHPErrors(page);
+
+    // Step 6: Check admin chrome
+    const adminCheck = await checkAdminChrome(page);
+    expect(
+      adminCheck.hasAdminBody ||
+      adminCheck.hasAdminBar ||
+      adminCheck.hasAdminMenu ||
+      adminCheck.hasWpBodyContent
+    ).toBe(true);
+
+    // Step 7: Check authentication
+    await checkAuthentication(page, path);
+
+    // Step 8: Check for PHP errors
+    checkForPHPErrors(phpErrors, allowPHPErrors, path);
+
+    // Step 9: Check for JavaScript errors
+    checkForJavaScriptErrors(
+      errorTracking.consoleErrors,
+      errorTracking.pageErrors,
+      allowConsoleErrors,
+      allowPageErrors,
+      path
+    );
+
+    // Step 10: Check dashboard notices
+    const dashboardNotices = await checkDashboardNotices(page, path);
+
+    // Step 11: Compare screenshot if needed
+    await compareScreenshotIfNeeded(page, path, pageContent);
+
+    const currentUrl = page.url();
+    const isLoginPage = currentUrl.includes('/wp-login.php');
+
+    return {
+      response,
+      adminCheck,
+      isAuthenticated: !isLoginPage,
+      phpErrors,
+      consoleErrors: errorTracking.consoleErrors,
+      pageErrors: errorTracking.pageErrors,
+      dashboardNotices,
+    };
+  } finally {
+    // Cleanup error tracking listeners
+    errorTracking.cleanup();
+  }
 }
 
 /**
