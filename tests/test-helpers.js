@@ -1809,3 +1809,134 @@ export async function testWordPressRESTEndpoints(page, wpInstance, endpoints) {
   return results;
 }
 
+/**
+ * Read discovery file synchronously at file load time
+ * This allows us to use Playwright's forEach pattern to generate individual test() calls
+ * Reference: https://playwright.dev/docs/test-parameterize
+ * @returns {Object|null} Discovery data object or null if file not found
+ */
+export function loadDiscoveryDataSync() {
+  // Derive discovery file path from debug log path (both are in wp-content)
+  const debugLogPath = process.env.WP_PLAYGROUND_DEBUG_LOG;
+  if (!debugLogPath) {
+    console.warn('Warning: WP_PLAYGROUND_DEBUG_LOG not set, discovery file cannot be loaded synchronously');
+    return null;
+  }
+
+  // Discovery file is in the same directory as debug.log
+  const discoveryFilePath = join(dirname(debugLogPath), 'big-mistake-discovery.json');
+
+  if (!existsSync(discoveryFilePath)) {
+    console.warn(`Warning: Discovery file not found at ${discoveryFilePath}`);
+    return null;
+  }
+
+  try {
+    const fileContent = readFileSync(discoveryFilePath, 'utf8');
+    return JSON.parse(fileContent);
+  } catch (error) {
+    console.warn(`Warning: Failed to read or parse discovery file: ${error.message}`);
+    return null;
+  }
+}
+
+/**
+ * Prepare admin pages to test from discovery data
+ * Combines menu and submenu items into a single list for unified testing
+ * Submenu items are only included in FULL_MODE
+ * @param {Object} discoveryData - Discovery data from loadDiscoveryDataSync()
+ * @returns {Array} Array of page items with path, title, slug, and description
+ */
+export function prepareAdminPagesToTest(discoveryData) {
+  const allPages = [];
+
+  // Add menu items
+  if (discoveryData?.adminMenuItems) {
+    for (const menuItem of discoveryData.adminMenuItems) {
+      const url = new URL(menuItem.url);
+      const path = url.pathname + url.search;
+      allPages.push({
+        path,
+        title: menuItem.title,
+        slug: menuItem.slug,
+        description: `Admin menu: ${menuItem.title} (${menuItem.slug})`,
+      });
+    }
+  }
+
+  // Add submenu items (only in full mode)
+  if (process.env.FULL_MODE === '1' && discoveryData?.adminSubmenuItems) {
+    for (const submenuItem of discoveryData.adminSubmenuItems) {
+      const submenuUrl = new URL(submenuItem.url);
+      const submenuPath = submenuUrl.pathname + submenuUrl.search;
+      allPages.push({
+        path: submenuPath,
+        title: submenuItem.title,
+        slug: submenuItem.slug,
+        description: `Admin submenu: ${submenuItem.title} (${submenuItem.slug})`,
+      });
+    }
+  }
+
+  // Filter out excluded pages
+  return allPages.filter((item) => {
+    // Exclude pages that trigger expected WordPress.org API connection errors
+    const apiErrorPaths = [
+      '/wp-admin/plugin-install.php',
+      '/wp-admin/update-core.php',
+    ];
+    return !apiErrorPaths.includes(item.path);
+  });
+}
+
+/**
+ * Prepare public pages to test from discovery data
+ * Combines post items, list pages, and common pages into a single list for unified testing
+ * Post items are filtered: one per type in standard mode, all in FULL_MODE
+ * @param {Object} discoveryData - Discovery data from loadDiscoveryDataSync()
+ * @returns {Array} Array of page items with path, title, bodyClass, type, and description
+ */
+export function preparePublicPagesToTest(discoveryData) {
+  const allPages = [];
+  const isFullMode = process.env.FULL_MODE === '1';
+
+  // Add post items (filter: one per type in standard mode, all in full mode)
+  if (discoveryData?.postItems) {
+    const postItemsByType = new Map();
+
+    // Group items by post type
+    for (const item of discoveryData.postItems) {
+      if (!item.path) continue;
+
+      if (!postItemsByType.has(item.postType)) {
+        postItemsByType.set(item.postType, []);
+      }
+      postItemsByType.get(item.postType).push(item);
+    }
+
+    // Add items: one per type in standard mode, all in full mode
+    for (const items of postItemsByType.values()) {
+      if (isFullMode) {
+        allPages.push(...items);
+      } else {
+        // Add first item of each type
+        if (items.length > 0) {
+          allPages.push(items[0]);
+        }
+      }
+    }
+  }
+
+  // Add list pages (flat array, no filtering needed)
+  if (discoveryData?.listPages && Array.isArray(discoveryData.listPages)) {
+    allPages.push(...discoveryData.listPages);
+  }
+
+  // Add common pages (homepage, feed)
+  if (discoveryData?.commonPages && Array.isArray(discoveryData.commonPages)) {
+    allPages.push(...discoveryData.commonPages);
+  }
+
+  return allPages;
+}
+

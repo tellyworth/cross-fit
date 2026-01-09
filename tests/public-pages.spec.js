@@ -9,92 +9,18 @@ import {
   checkForJavaScriptErrorsPublic,
   compareScreenshotPublic,
   normalizePath,
+  loadDiscoveryDataSync,
+  preparePublicPagesToTest,
 } from './test-helpers.js';
-import { readFileSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
 
 /**
  * @fileoverview Tests for public-facing WordPress pages
  */
 
-// Read discovery file synchronously at file load time
+// Load discovery data at file load time (synchronous)
 // This allows us to use Playwright's forEach pattern to generate individual test() calls
 // Reference: https://playwright.dev/docs/test-parameterize
-function loadDiscoveryDataSync() {
-  // Derive discovery file path from debug log path (both are in wp-content)
-  const debugLogPath = process.env.WP_PLAYGROUND_DEBUG_LOG;
-  if (!debugLogPath) {
-    console.warn('Warning: WP_PLAYGROUND_DEBUG_LOG not set, discovery file cannot be loaded synchronously');
-    return null;
-  }
-
-  // Discovery file is in the same directory as debug.log
-  const discoveryFilePath = join(dirname(debugLogPath), 'big-mistake-discovery.json');
-
-  if (!existsSync(discoveryFilePath)) {
-    console.warn(`Warning: Discovery file not found at ${discoveryFilePath}`);
-    return null;
-  }
-
-  try {
-    const fileContent = readFileSync(discoveryFilePath, 'utf8');
-    return JSON.parse(fileContent);
-  } catch (error) {
-    console.warn(`Warning: Failed to read or parse discovery file: ${error.message}`);
-    return null;
-  }
-}
-
-// Load discovery data at file load time (synchronous)
 const discoveryData = loadDiscoveryDataSync();
-
-// Combine post items, list pages, and common pages into a single list for unified testing
-// Post items are filtered: one per type in standard mode, all in FULL_MODE
-function preparePublicPagesToTest(discoveryData) {
-  const allPages = [];
-  const isFullMode = process.env.FULL_MODE === '1';
-
-  // Add post items (filter: one per type in standard mode, all in full mode)
-  if (discoveryData?.postItems) {
-    const postItemsByType = new Map();
-
-    // Group items by post type
-    for (const item of discoveryData.postItems) {
-      if (!item.path) continue;
-
-      if (!postItemsByType.has(item.postType)) {
-        postItemsByType.set(item.postType, []);
-      }
-      postItemsByType.get(item.postType).push(item);
-    }
-
-    // Add items: one per type in standard mode, all in full mode
-    for (const items of postItemsByType.values()) {
-    if (isFullMode) {
-        allPages.push(...items);
-    } else {
-        // Add first item of each type
-        if (items.length > 0) {
-          allPages.push(items[0]);
-        }
-      }
-    }
-  }
-
-  // Add list pages (flat array, no filtering needed)
-  if (discoveryData?.listPages && Array.isArray(discoveryData.listPages)) {
-    allPages.push(...discoveryData.listPages);
-  }
-
-  // Add common pages (homepage, feed)
-  if (discoveryData?.commonPages && Array.isArray(discoveryData.commonPages)) {
-    allPages.push(...discoveryData.commonPages);
-  }
-
-  return allPages;
-}
-
-// Prepare pages to test at file load time
 const publicPagesToTest = discoveryData ? preparePublicPagesToTest(discoveryData) : [];
 
 test.describe('WordPress Public Pages', { tag: '@public' }, () => {

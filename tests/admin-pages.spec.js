@@ -12,89 +12,18 @@ import {
   checkDashboardNotices,
   compareScreenshotIfNeeded,
   normalizePath,
+  loadDiscoveryDataSync,
+  prepareAdminPagesToTest,
 } from './test-helpers.js';
-import { readFileSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
 
 /**
  * @fileoverview Tests for authenticated WordPress admin pages
  */
 
-// Read discovery file synchronously at file load time
+// Load discovery data at file load time (synchronous)
 // This allows us to use Playwright's forEach pattern to generate individual test() calls
 // Reference: https://playwright.dev/docs/test-parameterize
-function loadDiscoveryDataSync() {
-  // Derive discovery file path from debug log path (both are in wp-content)
-  const debugLogPath = process.env.WP_PLAYGROUND_DEBUG_LOG;
-  if (!debugLogPath) {
-    console.warn('Warning: WP_PLAYGROUND_DEBUG_LOG not set, discovery file cannot be loaded synchronously');
-    return null;
-  }
-
-  // Discovery file is in the same directory as debug.log
-  const discoveryFilePath = join(dirname(debugLogPath), 'big-mistake-discovery.json');
-
-  if (!existsSync(discoveryFilePath)) {
-    console.warn(`Warning: Discovery file not found at ${discoveryFilePath}`);
-    return null;
-  }
-
-  try {
-    const fileContent = readFileSync(discoveryFilePath, 'utf8');
-    return JSON.parse(fileContent);
-  } catch (error) {
-    console.warn(`Warning: Failed to read or parse discovery file: ${error.message}`);
-    return null;
-  }
-}
-
-// Load discovery data at file load time (synchronous)
 const discoveryData = loadDiscoveryDataSync();
-
-// Combine menu and submenu items into a single list for unified testing
-// Submenu items are only included in FULL_MODE
-function prepareAdminPagesToTest(discoveryData) {
-  const allPages = [];
-
-  // Add menu items
-  if (discoveryData?.adminMenuItems) {
-    for (const menuItem of discoveryData.adminMenuItems) {
-      const url = new URL(menuItem.url);
-      const path = url.pathname + url.search;
-      allPages.push({
-        path,
-        title: menuItem.title,
-        slug: menuItem.slug,
-        description: `Admin menu: ${menuItem.title} (${menuItem.slug})`,
-      });
-    }
-  }
-
-  // Add submenu items (only in full mode)
-  if (process.env.FULL_MODE === '1' && discoveryData?.adminSubmenuItems) {
-    for (const submenuItem of discoveryData.adminSubmenuItems) {
-      const submenuUrl = new URL(submenuItem.url);
-      const submenuPath = submenuUrl.pathname + submenuUrl.search;
-      allPages.push({
-        path: submenuPath,
-        title: submenuItem.title,
-        slug: submenuItem.slug,
-        description: `Admin submenu: ${submenuItem.title} (${submenuItem.slug})`,
-      });
-    }
-  }
-
-  // Filter out excluded pages
-  return allPages.filter((item) => {
-    // Exclude pages that trigger expected WordPress.org API connection errors
-    const apiErrorPaths = [
-      '/wp-admin/plugin-install.php',
-      '/wp-admin/update-core.php',
-    ];
-    return !apiErrorPaths.includes(item.path);
-  });
-}
-
 const adminPagesToTest = prepareAdminPagesToTest(discoveryData);
 
 test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
