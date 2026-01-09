@@ -48,32 +48,24 @@ function loadDiscoveryDataSync() {
 // Load discovery data at file load time (synchronous)
 const discoveryData = loadDiscoveryDataSync();
 
-// Combine post items and list pages into a single list for unified testing
+// Combine post items, list pages, and common pages into a single list for unified testing
 // Post items are filtered: one per type in standard mode, all in FULL_MODE
 function preparePublicPagesToTest(discoveryData) {
   const allPages = [];
   const isFullMode = process.env.FULL_MODE === '1';
 
-  // Add post items
+  // Add post items (filter: one per type in standard mode, all in full mode)
   if (discoveryData?.postItems) {
     const postItemsByType = new Map();
 
     // Group items by post type
     for (const item of discoveryData.postItems) {
-      if (!item.link) continue;
-
-        const url = new URL(item.link);
-        const path = url.pathname + url.search;
+      if (!item.path) continue;
 
       if (!postItemsByType.has(item.postType)) {
         postItemsByType.set(item.postType, []);
       }
-      postItemsByType.get(item.postType).push({
-        path,
-        description: `${item.postTypeName} (${item.postType}): ${path}`,
-        type: 'post-item',
-        postType: item.postType,
-      });
+      postItemsByType.get(item.postType).push(item);
     }
 
     // Add items: one per type in standard mode, all in full mode
@@ -89,96 +81,15 @@ function preparePublicPagesToTest(discoveryData) {
     }
   }
 
-  // Add list pages (categories, tags, authors, date archives, CPT archives, search)
-  if (discoveryData?.listPages) {
-    const listPages = discoveryData.listPages;
-
-    // Categories
-    for (const cat of listPages.categories || []) {
-      if (cat.url) {
-        const url = new URL(cat.url);
-        allPages.push({
-          path: url.pathname + url.search,
-          description: `Category archive: ${cat.slug}`,
-          type: 'list-page',
-        });
-      }
-    }
-
-    // Tags
-    for (const tag of listPages.tags || []) {
-      if (tag.url) {
-        const url = new URL(tag.url);
-        allPages.push({
-          path: url.pathname + url.search,
-          description: `Tag archive: ${tag.slug}`,
-          type: 'list-page',
-        });
-      }
-    }
-
-    // Authors
-    for (const author of listPages.authors || []) {
-      if (author.url) {
-        const url = new URL(author.url);
-        allPages.push({
-          path: url.pathname + url.search,
-          description: `Author archive: ${author.slug}`,
-          type: 'list-page',
-        });
-      }
-    }
-
-    // Date archives
-    for (const dateArchive of listPages.dateArchives || []) {
-      if (dateArchive.url) {
-        const url = new URL(dateArchive.url);
-        const monthStr = dateArchive.month ? String(dateArchive.month).padStart(2, '0') : '';
-        const dateStr = monthStr ? `${dateArchive.year}/${monthStr}` : String(dateArchive.year);
-        allPages.push({
-          path: url.pathname + url.search,
-          description: `Date archive (${dateArchive.type || 'month'}): ${dateStr}`,
-          type: 'list-page',
-        });
-      }
-    }
-
-    // Custom post type archives
-    for (const cptArchive of listPages.customPostTypeArchives || []) {
-      if (cptArchive.url) {
-        const url = new URL(cptArchive.url);
-        allPages.push({
-          path: url.pathname + url.search,
-          description: `Custom post type archive: ${cptArchive.name || cptArchive.slug}`,
-          type: 'list-page',
-        });
-      }
-    }
-
-    // Search
-    if (listPages.search?.url) {
-      const url = new URL(listPages.search.url);
-      allPages.push({
-        path: url.pathname + url.search,
-            description: 'Search results',
-        type: 'list-page',
-        });
-      }
-    }
+  // Add list pages (flat array, no filtering needed)
+  if (discoveryData?.listPages && Array.isArray(discoveryData.listPages)) {
+    allPages.push(...discoveryData.listPages);
+  }
 
   // Add common pages (homepage, feed)
-  allPages.push(
-    {
-      path: '/',
-      description: 'Homepage',
-      type: 'common',
-    },
-    {
-      path: '/feed/',
-      description: 'RSS Feed',
-      type: 'common',
-    }
-  );
+  if (discoveryData?.commonPages && Array.isArray(discoveryData.commonPages)) {
+    allPages.push(...discoveryData.commonPages);
+  }
 
   return allPages;
 }
@@ -209,11 +120,15 @@ test.describe('WordPress Public Pages', { tag: '@public' }, () => {
           // Step 3: Get page content and detect PHP errors
           const { pageContent, phpErrors } = await getPageContentAndPHPErrors(page);
 
-          // Step 4: Validate page title (optional, not enforced for all pages)
-          // Skip for now - can be added per-page if needed
+          // Step 4: Validate page title (if provided in discovery data)
+          if (pageItem.title) {
+            await validatePageTitle(page, pageItem.title);
+          }
 
-          // Step 5: Validate body class (optional, not enforced for all pages)
-          // Skip for now - can be added per-page if needed
+          // Step 5: Validate body class (if provided in discovery data)
+          if (pageItem.bodyClass) {
+            await validateBodyClass(page, pageItem.bodyClass);
+          }
 
           // Step 6: Check for PHP errors
           checkForPHPErrorsPublic(phpErrors, false);

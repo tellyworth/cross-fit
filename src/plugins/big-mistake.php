@@ -477,11 +477,51 @@ add_filter('default_site_option_can_compress_scripts', 'big_mistake_filter_can_c
  * Generate discovery data for E2E tests.
  * Returns an array with post types, list pages, admin menu items, and submenu items.
  */
+/**
+ * Discover common public pages (homepage, feed, etc.)
+ * Returns array with path, title, and body class
+ */
+function big_mistake_discover_common_pages() {
+  $common_pages = array();
+
+  // Homepage
+  $home_path = '/';
+  $home_title = get_bloginfo('name');
+  $home_description = get_bloginfo('description');
+  if ($home_description) {
+    $home_title .= ' - ' . $home_description;
+  }
+  // Default body class for homepage (WordPress typically uses 'home blog' for blog homepage)
+  $home_body_class = 'home blog';
+
+  $common_pages[] = array(
+    'path' => $home_path,
+    'title' => $home_title,
+    'bodyClass' => $home_body_class,
+    'type' => 'homepage',
+    'description' => 'Homepage',
+  );
+
+  // RSS Feed
+  $feed_path = '/feed/';
+  $feed_title = get_bloginfo('name') . ' - Feed';
+  $common_pages[] = array(
+    'path' => $feed_path,
+    'title' => $feed_title,
+    'bodyClass' => 'feed',
+    'type' => 'feed',
+    'description' => 'RSS Feed',
+  );
+
+  return $common_pages;
+}
+
 function big_mistake_get_discovery_data_array() {
   return array(
     'postTypes'        => big_mistake_discover_post_types(),
     'postItems'        => big_mistake_discover_post_items(),
     'listPages'        => big_mistake_discover_list_pages(),
+    'commonPages'      => big_mistake_discover_common_pages(),
     'adminMenuItems'   => big_mistake_discover_admin_menu_items(),
     'adminSubmenuItems'=> big_mistake_discover_admin_submenu_items(),
   );
@@ -572,7 +612,8 @@ function big_mistake_discover_post_types() {
 
 /**
  * Discover published post items for each post type
- * Returns all published items (tests can filter to one per type if needed)
+ * Returns all published items with path, title, and body class
+ * Tests can filter to one per type if needed
  */
 function big_mistake_discover_post_items() {
   $post_types = get_post_types(array('public' => true, 'publicly_queryable' => true), 'objects');
@@ -609,12 +650,30 @@ function big_mistake_discover_post_items() {
     ));
 
     foreach ($posts as $post) {
+      $permalink = get_permalink($post->ID);
+      $url_obj = parse_url($permalink);
+      $path = isset($url_obj['path']) ? $url_obj['path'] : '/' . $post->post_name . '/';
+      if (isset($url_obj['query'])) {
+        $path .= '?' . $url_obj['query'];
+      }
+
+      // Construct title and body class based on WordPress conventions
+      $title = $post->post_title;
+      $body_class = $slug . ' post-' . $post->ID . ' single';
+      if ($slug !== 'post') {
+        $body_class .= ' post-type-' . $slug;
+      }
+
       $result[] = array(
+        'path' => $path,
+        'title' => $title,
+        'bodyClass' => $body_class,
+        'type' => 'post-item',
         'postType' => $slug,
         'postTypeName' => $post_type->label ?? $slug,
         'id' => $post->ID,
         'slug' => $post->post_name,
-        'link' => get_permalink($post->ID),
+        'description' => ($post_type->label ?? $slug) . ' (' . $slug . '): ' . $path,
       );
     }
   }
@@ -624,26 +683,32 @@ function big_mistake_discover_post_items() {
 
 /**
  * Discover list page types (archives, categories, tags, etc.)
- * Returns all instances, not just examples
+ * Returns a flat array with all instances, including path, title, and body class
  */
 function big_mistake_discover_list_pages() {
-  $list_pages = array(
-    'categories' => array(),
-    'tags' => array(),
-    'authors' => array(),
-    'dateArchives' => array(),
-    'customPostTypeArchives' => array(),
-    'search' => null,
-  );
+  $list_pages = array();
 
   // Discover categories (all categories, not just one)
   $categories = get_categories(array('hide_empty' => false));
   if (!empty($categories)) {
     foreach ($categories as $cat) {
-      $list_pages['categories'][] = array(
-        'id' => $cat->term_id,
-        'slug' => $cat->slug,
-        'url' => get_category_link($cat->term_id),
+      $url = get_category_link($cat->term_id);
+      $url_obj = parse_url($url);
+      $path = isset($url_obj['path']) ? $url_obj['path'] : '/category/' . $cat->slug . '/';
+      if (isset($url_obj['query'])) {
+        $path .= '?' . $url_obj['query'];
+      }
+
+      // Construct title and body class based on WordPress conventions
+      $title = $cat->name;
+      $body_class = 'archive category category-' . $cat->slug;
+
+      $list_pages[] = array(
+        'path' => $path,
+        'title' => $title,
+        'bodyClass' => $body_class,
+        'type' => 'category',
+        'description' => 'Category archive: ' . $cat->slug,
       );
     }
   }
@@ -652,10 +717,22 @@ function big_mistake_discover_list_pages() {
   $tags = get_tags(array('hide_empty' => false));
   if (!empty($tags)) {
     foreach ($tags as $tag) {
-      $list_pages['tags'][] = array(
-        'id' => $tag->term_id,
-        'slug' => $tag->slug,
-        'url' => get_tag_link($tag->term_id),
+      $url = get_tag_link($tag->term_id);
+      $url_obj = parse_url($url);
+      $path = isset($url_obj['path']) ? $url_obj['path'] : '/tag/' . $tag->slug . '/';
+      if (isset($url_obj['query'])) {
+        $path .= '?' . $url_obj['query'];
+      }
+
+      $title = $tag->name;
+      $body_class = 'archive tag tag-' . $tag->slug;
+
+      $list_pages[] = array(
+        'path' => $path,
+        'title' => $title,
+        'bodyClass' => $body_class,
+        'type' => 'tag',
+        'description' => 'Tag archive: ' . $tag->slug,
       );
     }
   }
@@ -667,10 +744,22 @@ function big_mistake_discover_list_pages() {
   ));
   if (!empty($authors)) {
     foreach ($authors as $author) {
-      $list_pages['authors'][] = array(
-        'id' => $author->ID,
-        'slug' => $author->user_nicename,
-        'url' => get_author_posts_url($author->ID),
+      $url = get_author_posts_url($author->ID);
+      $url_obj = parse_url($url);
+      $path = isset($url_obj['path']) ? $url_obj['path'] : '/author/' . $author->user_nicename . '/';
+      if (isset($url_obj['query'])) {
+        $path .= '?' . $url_obj['query'];
+      }
+
+      $title = $author->display_name;
+      $body_class = 'archive author author-' . $author->user_nicename;
+
+      $list_pages[] = array(
+        'path' => $path,
+        'title' => $title,
+        'bodyClass' => $body_class,
+        'type' => 'author',
+        'description' => 'Author archive: ' . $author->user_nicename,
       );
     }
   }
@@ -685,11 +774,24 @@ function big_mistake_discover_list_pages() {
   );
   if (!empty($date_archives)) {
     foreach ($date_archives as $archive) {
-      $list_pages['dateArchives'][] = array(
-        'year' => (int) $archive->year,
-        'month' => (int) $archive->month,
-        'type' => 'month',
-        'url' => get_month_link($archive->year, $archive->month),
+      $url = get_month_link($archive->year, $archive->month);
+      $url_obj = parse_url($url);
+      $path = isset($url_obj['path']) ? $url_obj['path'] : '/' . $archive->year . '/' . sprintf('%02d', $archive->month) . '/';
+      if (isset($url_obj['query'])) {
+        $path .= '?' . $url_obj['query'];
+      }
+
+      // Use WordPress date format
+      $date_str = date_i18n('F Y', strtotime($archive->year . '-' . sprintf('%02d', $archive->month) . '-01'));
+      $title = $date_str;
+      $body_class = 'archive date';
+
+      $list_pages[] = array(
+        'path' => $path,
+        'title' => $title,
+        'bodyClass' => $body_class,
+        'type' => 'date-archive',
+        'description' => 'Date archive (month): ' . $date_str,
       );
     }
   }
@@ -702,17 +804,33 @@ function big_mistake_discover_list_pages() {
     }
     $archive_url = get_post_type_archive_link($slug);
     if ($archive_url) {
-      $list_pages['customPostTypeArchives'][] = array(
-        'slug' => $slug,
-        'name' => $post_type->label ?? $slug,
-        'url' => $archive_url,
+      $url_obj = parse_url($archive_url);
+      $path = isset($url_obj['path']) ? $url_obj['path'] : '/' . $slug . '/';
+      if (isset($url_obj['query'])) {
+        $path .= '?' . $url_obj['query'];
+      }
+
+      $title = ($post_type->label ?? $slug);
+      $body_class = 'archive post-type-archive post-type-archive-' . $slug;
+
+      $list_pages[] = array(
+        'path' => $path,
+        'title' => $title,
+        'bodyClass' => $body_class,
+        'type' => 'custom-post-type-archive',
+        'description' => 'Custom post type archive: ' . ($post_type->label ?? $slug),
       );
     }
   }
 
   // Search is always available
-  $list_pages['search'] = array(
-    'url' => home_url('/?s=test'),
+  $search_path = '/?s=test';
+  $list_pages[] = array(
+    'path' => $search_path,
+    'title' => 'Search Results for: “test”',
+    'bodyClass' => 'search search-results',
+    'type' => 'search',
+    'description' => 'Search results',
   );
 
   return $list_pages;
