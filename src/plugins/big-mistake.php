@@ -480,6 +480,7 @@ add_filter('default_site_option_can_compress_scripts', 'big_mistake_filter_can_c
 function big_mistake_get_discovery_data_array() {
   return array(
     'postTypes'        => big_mistake_discover_post_types(),
+    'postItems'        => big_mistake_discover_post_items(),
     'listPages'        => big_mistake_discover_list_pages(),
     'adminMenuItems'   => big_mistake_discover_admin_menu_items(),
     'adminSubmenuItems'=> big_mistake_discover_admin_submenu_items(),
@@ -570,7 +571,60 @@ function big_mistake_discover_post_types() {
 }
 
 /**
+ * Discover published post items for each post type
+ * Returns all published items (tests can filter to one per type if needed)
+ */
+function big_mistake_discover_post_items() {
+  $post_types = get_post_types(array('public' => true, 'publicly_queryable' => true), 'objects');
+  $excluded_types = array(
+    'attachment',
+    'nav_menu_item',
+    'revision',
+    'wp_template',
+    'wp_template_part',
+    'wp_global_styles',
+    'wp_navigation',
+    'wp_font_family',
+    'wp_font_face',
+  );
+
+  $result = array();
+  foreach ($post_types as $slug => $post_type) {
+    if (in_array($slug, $excluded_types, true)) {
+      continue;
+    }
+
+    $rest_base = $post_type->rest_base ?? $slug;
+    if (!$rest_base) {
+      continue;
+    }
+
+    // Get all published items of this post type
+    $posts = get_posts(array(
+      'post_type' => $slug,
+      'post_status' => 'publish',
+      'numberposts' => -1, // Get all published posts
+      'orderby' => 'date',
+      'order' => 'DESC',
+    ));
+
+    foreach ($posts as $post) {
+      $result[] = array(
+        'postType' => $slug,
+        'postTypeName' => $post_type->label ?? $slug,
+        'id' => $post->ID,
+        'slug' => $post->post_name,
+        'link' => get_permalink($post->ID),
+      );
+    }
+  }
+
+  return $result;
+}
+
+/**
  * Discover list page types (archives, categories, tags, etc.)
+ * Returns all instances, not just examples
  */
 function big_mistake_discover_list_pages() {
   $list_pages = array(
@@ -582,8 +636,8 @@ function big_mistake_discover_list_pages() {
     'search' => null,
   );
 
-  // Discover categories
-  $categories = get_categories(array('hide_empty' => false, 'number' => 1));
+  // Discover categories (all categories, not just one)
+  $categories = get_categories(array('hide_empty' => false));
   if (!empty($categories)) {
     foreach ($categories as $cat) {
       $list_pages['categories'][] = array(
@@ -594,8 +648,8 @@ function big_mistake_discover_list_pages() {
     }
   }
 
-  // Discover tags
-  $tags = get_tags(array('hide_empty' => false, 'number' => 1));
+  // Discover tags (all tags, not just one)
+  $tags = get_tags(array('hide_empty' => false));
   if (!empty($tags)) {
     foreach ($tags as $tag) {
       $list_pages['tags'][] = array(
@@ -606,10 +660,10 @@ function big_mistake_discover_list_pages() {
     }
   }
 
-  // Discover authors (avoid deprecated 'who' parameter; use capability instead)
+  // Discover authors (all authors with posts, not just one)
   $authors = get_users(array(
     'capability' => 'edit_posts',
-    'number' => 1,
+    'has_published_posts' => true,
   ));
   if (!empty($authors)) {
     foreach ($authors as $author) {
@@ -621,18 +675,21 @@ function big_mistake_discover_list_pages() {
     }
   }
 
-  // Discover date archives (from most recent post)
-  $recent_post = get_posts(array('numberposts' => 1, 'post_status' => 'publish'));
-  if (!empty($recent_post)) {
-    // Use get_post_time() directly with format strings to respect WordPress timezone settings
-    // Second parameter false = use site timezone (not GMT)
-    $year = get_post_time('Y', false, $recent_post[0]);
-    $month = get_post_time('m', false, $recent_post[0]);
-    if ($year && $month) {
+  // Discover date archives (all unique year/month combinations from published posts)
+  global $wpdb;
+  $date_archives = $wpdb->get_results(
+    "SELECT DISTINCT YEAR(post_date) as year, MONTH(post_date) as month
+     FROM {$wpdb->posts}
+     WHERE post_status = 'publish' AND post_type = 'post'
+     ORDER BY year DESC, month DESC"
+  );
+  if (!empty($date_archives)) {
+    foreach ($date_archives as $archive) {
       $list_pages['dateArchives'][] = array(
-        'year' => $year,
-        'month' => $month,
-        'url' => get_month_link($year, $month),
+        'year' => (int) $archive->year,
+        'month' => (int) $archive->month,
+        'type' => 'month',
+        'url' => get_month_link($archive->year, $archive->month),
       );
     }
   }

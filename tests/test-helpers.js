@@ -299,9 +299,8 @@ export async function testWordPressPage(page, wpInstance, path, options = {}) {
   const errorTracking = setupErrorTracking(page);
 
   try {
-    // Step 2: Navigate to page
-    const response = await navigateToPage(page, url, waitUntil);
-  expect(response.status()).toBe(expectedStatus);
+    // Step 2: Navigate to page (checks status internally)
+    await navigateToPage(page, url, waitUntil, expectedStatus);
 
     // Step 3: Get page content and detect PHP errors
     const { pageContent, phpErrors } = await getPageContentAndPHPErrors(page);
@@ -327,9 +326,8 @@ export async function testWordPressPage(page, wpInstance, path, options = {}) {
     await compareScreenshotPublic(page, path, pageContent, allowPHPErrors);
 
   return {
-    response,
-      consoleErrors: errorTracking.consoleErrors,
-      pageErrors: errorTracking.pageErrors,
+    consoleErrors: errorTracking.consoleErrors,
+    pageErrors: errorTracking.pageErrors,
     phpErrors,
     title: await page.title(),
     bodyClasses: await page.evaluate(() => document.body.className),
@@ -1217,25 +1215,25 @@ export async function navigateToAdminPage(page, url, retryDelayMs = 500, navigat
   let response;
   try {
     response = await page.goto(url, { waitUntil: 'commit', timeout: navigationTimeout });
-  } catch (e) {
-    if (page.isClosed()) {
-      throw new Error('Page was closed during navigation');
-    }
-    if (String(e.message || '').includes('ERR_ABORTED') || String(e.message || '').includes('Target page')) {
-      await page.waitForTimeout(retryDelayMs);
+    } catch (e) {
       if (page.isClosed()) {
-        throw new Error('Page was closed after navigation error');
+        throw new Error('Page was closed during navigation');
       }
-      try {
-        response = await page.goto(url, { waitUntil: 'commit', timeout: navigationTimeout });
-      } catch (retryError) {
+      if (String(e.message || '').includes('ERR_ABORTED') || String(e.message || '').includes('Target page')) {
+        await page.waitForTimeout(retryDelayMs);
         if (page.isClosed()) {
-          throw new Error('Page was closed during retry navigation');
+          throw new Error('Page was closed after navigation error');
         }
-        throw retryError;
-      }
-    } else {
-      throw e;
+        try {
+        response = await page.goto(url, { waitUntil: 'commit', timeout: navigationTimeout });
+        } catch (retryError) {
+          if (page.isClosed()) {
+            throw new Error('Page was closed during retry navigation');
+          }
+          throw retryError;
+        }
+      } else {
+        throw e;
     }
   }
 
@@ -1545,14 +1543,15 @@ export async function compareScreenshotIfNeeded(page, path, pageContent) {
  */
 
 /**
- * Navigate to a public WordPress page
+ * Navigate to a public WordPress page and check status
  * @param {import('@playwright/test').Page} page - Playwright page object
  * @param {string} url - Full URL to navigate to
  * @param {string} [waitUntil='load'] - Playwright waitUntil option
- * @returns {Promise<import('@playwright/test').Response>} Response object
+ * @param {number} [expectedStatus=200] - Expected HTTP status code
  */
-export async function navigateToPage(page, url, waitUntil = 'load') {
-  return await page.goto(url, { waitUntil });
+export async function navigateToPage(page, url, waitUntil = 'load', expectedStatus = 200) {
+  const response = await page.goto(url, { waitUntil });
+  expect(response.status()).toBe(expectedStatus);
 }
 
 /**
