@@ -504,11 +504,10 @@ function big_mistake_discover_common_pages() {
 
   // RSS Feed
   $feed_path = '/feed/';
-  $feed_title = get_bloginfo('name') . ' - Feed';
   $common_pages[] = array(
     'path' => $feed_path,
-    'title' => $feed_title,
-    'bodyClass' => 'feed',
+    'title' => '',
+    'bodyClass' => '',
     'type' => 'feed',
     'description' => 'RSS Feed',
   );
@@ -659,7 +658,7 @@ function big_mistake_discover_post_items() {
 
       // Construct title and body class based on WordPress conventions
       $title = $post->post_title;
-      $body_class = $slug . ' post-' . $post->ID . ' single';
+      $body_class = 'single single-post postid-' . $post->ID;
       if ($slug !== 'post') {
         $body_class .= ' post-type-' . $slug;
       }
@@ -827,8 +826,8 @@ function big_mistake_discover_list_pages() {
   $search_path = '/?s=test';
   $list_pages[] = array(
     'path' => $search_path,
-    'title' => 'Search Results for: “test”',
-    'bodyClass' => 'search search-results',
+    'title' => 'Search Results for “test”',
+    'bodyClass' => 'search',
     'type' => 'search',
     'description' => 'Search results',
   );
