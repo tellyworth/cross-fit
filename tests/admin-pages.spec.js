@@ -1,6 +1,17 @@
 import { test, expect } from './wp-fixtures.js';
 import {
-  testWordPressAdminPage,
+  setupErrorTracking,
+  navigateToAdminPage,
+  waitForAdminUI,
+  waitForJavaScriptReady,
+  getPageContentAndPHPErrors,
+  checkAdminChrome,
+  checkAuthentication,
+  checkForPHPErrors,
+  checkForJavaScriptErrors,
+  checkDashboardNotices,
+  compareScreenshotIfNeeded,
+  normalizePath,
 } from './test-helpers.js';
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
@@ -80,33 +91,13 @@ function prepareAdminPagesToTest(discoveryData) {
       '/wp-admin/plugin-install.php',
       '/wp-admin/update-core.php',
     ];
-    if (apiErrorPaths.includes(item.path)) {
-      return false;
-    }
-
-    // Exclude pages that have explicit tests with additional coverage
-    // These pages are tested separately with more specific assertions
-    const explicitTestPaths = [
-      '/wp-admin/', // Tested by "should access authenticated admin dashboard"
-      '/wp-admin/options-general.php', // Tested by "should successfully submit POST request to change site options"
-    ];
-    if (explicitTestPaths.includes(item.path)) {
-      return false;
-    }
-
-    return true;
+    return !apiErrorPaths.includes(item.path);
   });
 }
 
 const adminPagesToTest = prepareAdminPagesToTest(discoveryData);
 
 test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
-
-  // Explicit test for dashboard with smoke tag for quick validation
-  // This page is excluded from the discovery loop since it has explicit coverage
-  test('should access authenticated admin dashboard', { tag: '@smoke' }, async ({ page, wpInstance }) => {
-    await testWordPressAdminPage(page, wpInstance, '/wp-admin/');
-  });
 
   test('should successfully submit POST request to change site options', async ({ page, wpInstance }) => {
     // Navigate to General Settings page
@@ -161,9 +152,60 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
     // Reference: https://playwright.dev/docs/test-parameterize
     adminPagesToTest.forEach((pageItem) => {
       test(`admin page: ${pageItem.title} (${pageItem.path})`, async ({ page, wpInstance }) => {
-        await testWordPressAdminPage(page, wpInstance, pageItem.path, {
-          description: pageItem.description,
-        });
+        const url = normalizePath(wpInstance.url, pageItem.path);
+
+        // Step 1: Set up error tracking
+        const errorTracking = setupErrorTracking(page);
+
+        try {
+          // Step 2: Navigate to admin page
+          const response = await navigateToAdminPage(page, url);
+          if (response) {
+            expect(response.status()).toBe(200);
+          }
+
+          // Step 3: Wait for admin UI elements
+          await waitForAdminUI(page);
+
+          // Step 4: Wait for JavaScript to be ready
+          await waitForJavaScriptReady(page);
+
+          // Step 5: Get page content and detect PHP errors
+          const { pageContent, phpErrors } = await getPageContentAndPHPErrors(page);
+
+          // Step 6: Check admin chrome
+          const adminCheck = await checkAdminChrome(page);
+          expect(
+            adminCheck.hasAdminBody ||
+            adminCheck.hasAdminBar ||
+            adminCheck.hasAdminMenu ||
+            adminCheck.hasWpBodyContent
+          ).toBe(true);
+
+          // Step 7: Check authentication
+          await checkAuthentication(page, pageItem.path);
+
+          // Step 8: Check for PHP errors
+          checkForPHPErrors(phpErrors, false, pageItem.path);
+
+          // Step 9: Check for JavaScript errors
+          checkForJavaScriptErrors(
+            errorTracking.consoleErrors,
+            errorTracking.pageErrors,
+            false,
+            false,
+            pageItem.path
+          );
+
+          // Step 10: Check dashboard notices
+          await checkDashboardNotices(page, pageItem.path);
+
+          // Step 11: Compare screenshot if needed
+          await compareScreenshotIfNeeded(page, pageItem.path, pageContent);
+        } finally {
+          // Cleanup error tracking listeners
+          errorTracking.cleanup();
+        }
       });
     });
 
