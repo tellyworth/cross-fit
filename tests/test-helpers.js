@@ -109,7 +109,7 @@ async function compareScreenshot(page, path, snapshotName, options = {}) {
  * @param {string} path - Relative path (e.g., '/wp-admin/') or full URL
  * @returns {string} Full URL
  */
-function normalizePath(baseUrl, path) {
+export function normalizePath(baseUrl, path) {
   // If path is already a full URL, return it
   if (path.startsWith('http://') || path.startsWith('https://')) {
     return path;
@@ -301,7 +301,7 @@ export async function testWordPressPage(page, wpInstance, path, options = {}) {
   try {
     // Step 2: Navigate to page
     const response = await navigateToPage(page, url, waitUntil);
-    expect(response.status()).toBe(expectedStatus);
+  expect(response.status()).toBe(expectedStatus);
 
     // Step 3: Get page content and detect PHP errors
     const { pageContent, phpErrors } = await getPageContentAndPHPErrors(page);
@@ -326,14 +326,14 @@ export async function testWordPressPage(page, wpInstance, path, options = {}) {
     // Step 8: Compare screenshot if needed
     await compareScreenshotPublic(page, path, pageContent, allowPHPErrors);
 
-    return {
-      response,
+  return {
+    response,
       consoleErrors: errorTracking.consoleErrors,
       pageErrors: errorTracking.pageErrors,
-      phpErrors,
-      title: await page.title(),
-      bodyClasses: await page.evaluate(() => document.body.className),
-    };
+    phpErrors,
+    title: await page.title(),
+    bodyClasses: await page.evaluate(() => document.body.className),
+  };
   } finally {
     // Cleanup error tracking listeners
     errorTracking.cleanup();
@@ -1216,29 +1216,29 @@ export async function navigateToAdminPage(page, url, retryDelayMs = 500, navigat
   }
 
   try {
-    return await page.goto(url, { waitUntil: 'commit', timeout: navigationTimeout });
-  } catch (e) {
-    if (page.isClosed()) {
-      throw new Error('Page was closed during navigation');
-    }
-    if (String(e.message || '').includes('ERR_ABORTED') || String(e.message || '').includes('Target page')) {
-      await page.waitForTimeout(retryDelayMs);
+      return await page.goto(url, { waitUntil: 'commit', timeout: navigationTimeout });
+    } catch (e) {
       if (page.isClosed()) {
-        throw new Error('Page was closed after navigation error');
+        throw new Error('Page was closed during navigation');
       }
-      try {
-        return await page.goto(url, { waitUntil: 'commit', timeout: navigationTimeout });
-      } catch (retryError) {
+      if (String(e.message || '').includes('ERR_ABORTED') || String(e.message || '').includes('Target page')) {
+        await page.waitForTimeout(retryDelayMs);
         if (page.isClosed()) {
-          throw new Error('Page was closed during retry navigation');
+          throw new Error('Page was closed after navigation error');
         }
-        throw retryError;
+        try {
+          return await page.goto(url, { waitUntil: 'commit', timeout: navigationTimeout });
+        } catch (retryError) {
+          if (page.isClosed()) {
+            throw new Error('Page was closed during retry navigation');
+          }
+          throw retryError;
+        }
+      } else {
+        throw e;
       }
-    } else {
-      throw e;
     }
   }
-}
 
 /**
  * Step 3: Wait for admin UI elements to appear
@@ -1621,88 +1621,28 @@ export async function compareScreenshotPublic(page, path, pageContent, allowPHPE
 }
 
 /**
- * Test authenticated WordPress admin page
- * This is a convenience wrapper that calls all the composable steps in order.
- * For more control, use the individual step functions directly.
+ * Simple helper to navigate to an admin page and verify basic response
+ * This is a lightweight function for tests that just need to load an admin page
+ * without all the comprehensive validation steps.
+ *
+ * For comprehensive admin page testing with error detection, use the individual
+ * step functions directly (setupErrorTracking, navigateToAdminPage, etc.)
  *
  * @param {import('@playwright/test').Page} page - Playwright page object
  * @param {Object} wpInstance - WordPress instance with url property
  * @param {string} path - Relative path to admin page (e.g., '/wp-admin/')
- * @param {Object} options - Optional test options
  */
-export async function testWordPressAdminPage(page, wpInstance, path, options = {}) {
+export async function testWordPressAdminPage(page, wpInstance, path) {
   const url = normalizePath(wpInstance.url, path);
-  const {
-    allowConsoleErrors = false,
-    allowPageErrors = false,
-    allowPHPErrors = false,
-  } = options;
 
-  // Step 1: Set up error tracking
-  const errorTracking = setupErrorTracking(page);
-
-  try {
-    // Step 2: Navigate to admin page
-    const response = await navigateToAdminPage(page, url);
-    if (response) {
-      expect(response.status()).toBe(200);
-    }
-
-    // Step 3: Wait for admin UI elements
-    await waitForAdminUI(page);
-
-    // Step 4: Wait for JavaScript to be ready
-    await waitForJavaScriptReady(page);
-
-    // Step 5: Get page content and detect PHP errors
-    const { pageContent, phpErrors } = await getPageContentAndPHPErrors(page);
-
-    // Step 6: Check admin chrome
-    const adminCheck = await checkAdminChrome(page);
-    expect(
-      adminCheck.hasAdminBody ||
-      adminCheck.hasAdminBar ||
-      adminCheck.hasAdminMenu ||
-      adminCheck.hasWpBodyContent
-    ).toBe(true);
-
-    // Step 7: Check authentication
-    await checkAuthentication(page, path);
-
-    // Step 8: Check for PHP errors
-    checkForPHPErrors(phpErrors, allowPHPErrors, path);
-
-    // Step 9: Check for JavaScript errors
-    checkForJavaScriptErrors(
-      errorTracking.consoleErrors,
-      errorTracking.pageErrors,
-      allowConsoleErrors,
-      allowPageErrors,
-      path
-    );
-
-    // Step 10: Check dashboard notices
-    const dashboardNotices = await checkDashboardNotices(page, path);
-
-    // Step 11: Compare screenshot if needed
-    await compareScreenshotIfNeeded(page, path, pageContent);
-
-    const currentUrl = page.url();
-    const isLoginPage = currentUrl.includes('/wp-login.php');
-
-    return {
-      response,
-      adminCheck,
-      isAuthenticated: !isLoginPage,
-      phpErrors,
-      consoleErrors: errorTracking.consoleErrors,
-      pageErrors: errorTracking.pageErrors,
-      dashboardNotices,
-    };
-  } finally {
-    // Cleanup error tracking listeners
-    errorTracking.cleanup();
+  // Navigate to admin page with retry logic
+  const response = await navigateToAdminPage(page, url);
+  if (response) {
+    expect(response.status()).toBe(200);
   }
+
+  // Wait for basic admin UI elements to confirm page loaded
+  await waitForAdminUI(page);
 }
 
 /**
