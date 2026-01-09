@@ -347,6 +347,8 @@ add_action('http_api_debug', function($response, $context, $class, $args, $url) 
       $request_uri = isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : 'unknown';
 
       // Log backtrace to debug.log if WP_DEBUG_LOG is enabled
+      // Note: We intentionally do NOT trigger a PHP error here to prevent error cascades
+      // when testing real plugins. HTTP timeout errors are logged but not displayed in page output.
       if (defined('WP_DEBUG_LOG') && WP_DEBUG_LOG) {
         // Include backtrace only if WP_ENABLE_BACKTRACES is set (HTTP errors are warnings, not fatal)
         $backtrace_text = '';
