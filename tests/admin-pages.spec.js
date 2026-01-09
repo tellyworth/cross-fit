@@ -158,11 +158,8 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
         const errorTracking = setupErrorTracking(page);
 
         try {
-          // Step 2: Navigate to admin page
-          const response = await navigateToAdminPage(page, url);
-          if (response) {
-            expect(response.status()).toBe(200);
-          }
+          // Step 2: Navigate to admin page (checks status internally)
+          await navigateToAdminPage(page, url);
 
           // Step 3: Wait for admin UI elements
           await waitForAdminUI(page);
@@ -173,14 +170,8 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
           // Step 5: Get page content and detect PHP errors
           const { pageContent, phpErrors } = await getPageContentAndPHPErrors(page);
 
-          // Step 6: Check admin chrome
-          const adminCheck = await checkAdminChrome(page);
-          expect(
-            adminCheck.hasAdminBody ||
-            adminCheck.hasAdminBar ||
-            adminCheck.hasAdminMenu ||
-            adminCheck.hasWpBodyContent
-          ).toBe(true);
+          // Step 6: Check admin chrome (does expect internally)
+          await checkAdminChrome(page);
 
           // Step 7: Check authentication
           await checkAuthentication(page, pageItem.path);

@@ -1203,42 +1203,47 @@ export function setupErrorTracking(page) {
 }
 
 /**
- * Step 2: Navigate to admin page with retry logic
+ * Step 2: Navigate to admin page with retry logic and status check
  * @param {import('@playwright/test').Page} page - Playwright page object
  * @param {string} url - Full URL to navigate to
  * @param {number} [retryDelayMs=500] - Delay before retrying navigation
  * @param {number} [navigationTimeout=30000] - Navigation timeout
- * @returns {Promise<import('@playwright/test').Response>} Response object
  */
 export async function navigateToAdminPage(page, url, retryDelayMs = 500, navigationTimeout = 30000) {
   if (page.isClosed()) {
     throw new Error('Page was closed before navigation');
   }
 
+  let response;
   try {
-      return await page.goto(url, { waitUntil: 'commit', timeout: navigationTimeout });
-    } catch (e) {
+    response = await page.goto(url, { waitUntil: 'commit', timeout: navigationTimeout });
+  } catch (e) {
+    if (page.isClosed()) {
+      throw new Error('Page was closed during navigation');
+    }
+    if (String(e.message || '').includes('ERR_ABORTED') || String(e.message || '').includes('Target page')) {
+      await page.waitForTimeout(retryDelayMs);
       if (page.isClosed()) {
-        throw new Error('Page was closed during navigation');
+        throw new Error('Page was closed after navigation error');
       }
-      if (String(e.message || '').includes('ERR_ABORTED') || String(e.message || '').includes('Target page')) {
-        await page.waitForTimeout(retryDelayMs);
+      try {
+        response = await page.goto(url, { waitUntil: 'commit', timeout: navigationTimeout });
+      } catch (retryError) {
         if (page.isClosed()) {
-          throw new Error('Page was closed after navigation error');
+          throw new Error('Page was closed during retry navigation');
         }
-        try {
-          return await page.goto(url, { waitUntil: 'commit', timeout: navigationTimeout });
-        } catch (retryError) {
-          if (page.isClosed()) {
-            throw new Error('Page was closed during retry navigation');
-          }
-          throw retryError;
-        }
-      } else {
-        throw e;
+        throw retryError;
       }
+    } else {
+      throw e;
     }
   }
+
+  // Check response status internally
+  if (response) {
+    expect(response.status()).toBe(200);
+  }
+}
 
 /**
  * Step 3: Wait for admin UI elements to appear
@@ -1304,11 +1309,11 @@ export async function getPageContentAndPHPErrors(page) {
 
 /**
  * Step 6: Check for admin chrome elements (admin bar, menu, etc.)
+ * Verifies that at least one admin UI element is present
  * @param {import('@playwright/test').Page} page - Playwright page object
- * @returns {Promise<Object>} Object with admin check results
  */
 export async function checkAdminChrome(page) {
-  return await page.evaluate(() => {
+  const adminCheck = await page.evaluate(() => {
     return {
       hasAdminBody: document.body?.classList?.contains('wp-admin') || false,
       hasAdminBar: !!document.querySelector('#wpadminbar'),
@@ -1316,6 +1321,14 @@ export async function checkAdminChrome(page) {
       hasWpBodyContent: !!document.querySelector('#wpbody-content'),
     };
   });
+
+  // Assert that at least one admin element is present
+  expect(
+    adminCheck.hasAdminBody ||
+    adminCheck.hasAdminBar ||
+    adminCheck.hasAdminMenu ||
+    adminCheck.hasWpBodyContent
+  ).toBe(true);
 }
 
 /**
