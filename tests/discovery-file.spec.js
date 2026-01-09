@@ -60,18 +60,22 @@ test.describe('Discovery File', { tag: '@internal' }, () => {
     // Should have at least the default 'post' type
     expect(data.postTypes.some(pt => pt.slug === 'post')).toBe(true);
 
-    // Verify listPages exists and has expected structure
+    // Verify listPages exists and is a flat array (new structure)
     expect(data.listPages).toBeDefined();
-    expect(typeof data.listPages).toBe('object');
-    expect(Array.isArray(data.listPages.categories)).toBe(true);
-    expect(Array.isArray(data.listPages.tags)).toBe(true);
-    expect(Array.isArray(data.listPages.authors)).toBe(true);
-    expect(Array.isArray(data.listPages.dateArchives)).toBe(true);
-    expect(Array.isArray(data.listPages.customPostTypeArchives)).toBe(true);
+    expect(Array.isArray(data.listPages)).toBe(true);
+    // Should have at least some list pages
+    expect(data.listPages.length).toBeGreaterThan(0);
+    // Verify list pages have required fields
+    if (data.listPages.length > 0) {
+      const listPage = data.listPages[0];
+      expect(listPage).toHaveProperty('path');
+      expect(listPage).toHaveProperty('type');
+      expect(listPage).toHaveProperty('description');
+    }
     // Should have at least one category (uncategorized)
-    expect(data.listPages.categories.length).toBeGreaterThan(0);
+    expect(data.listPages.some(page => page.type === 'category')).toBe(true);
     // Should have at least one author (admin)
-    expect(data.listPages.authors.length).toBeGreaterThan(0);
+    expect(data.listPages.some(page => page.type === 'author')).toBe(true);
 
     // Verify adminMenuItems exists and contains reasonable number of items
     expect(Array.isArray(data.adminMenuItems)).toBe(true);
