@@ -140,6 +140,12 @@ function big_mistake_disable_external_feeds() {
   remove_meta_box('dashboard_primary', 'dashboard', 'side'); // WordPress News
   remove_meta_box('dashboard_secondary', 'dashboard', 'side'); // Other WordPress News
   remove_meta_box('dashboard_plugins', 'dashboard', 'normal'); // Plugins feed
+
+  // Preemptively remove ActivityPub dashboard widgets because they'll cause timeouts
+  remove_meta_box( 'activitypub_blog', null, 'normal');
+  remove_meta_box( 'activitypub_profile', null, 'normal');
+  remove_meta_box( 'activitypub_blog_profile', null, 'normal');
+
 }
 
 add_action('wp_dashboard_setup', 'big_mistake_disable_external_feeds', 999);
