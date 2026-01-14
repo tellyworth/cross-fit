@@ -90,6 +90,10 @@ async function main() {
   if (hasDebugFlag) {
     env.DEBUG = '1';
     env.WP_ENABLE_BACKTRACES = '1';
+    env.PW_TRACE = 'retain-on-failure';
+    env.PW_VIDEO = 'retain-on-failure';
+    env.PW_SCREENSHOT = 'only-on-failure';
+
     // If --debug is set and --debug-log is not explicitly set, enable it with large limit
     if (!options.debugLog && !options['debug-log']) {
       env.WP_DEBUG_LOG_LINES = '10000';
