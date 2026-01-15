@@ -1215,31 +1215,82 @@ export async function navigateToAdminPage(page, url, retryDelayMs = 500, navigat
   let response;
   try {
     response = await page.goto(url, { waitUntil: 'commit', timeout: navigationTimeout });
-    } catch (e) {
+  } catch (e) {
+    if (page.isClosed()) {
+      throw new Error('Page was closed during navigation');
+    }
+    // Retry on ERR_ABORTED or target page errors
+    if (String(e.message || '').includes('ERR_ABORTED') || String(e.message || '').includes('Target page')) {
+      await page.waitForTimeout(retryDelayMs);
       if (page.isClosed()) {
-        throw new Error('Page was closed during navigation');
+        throw new Error('Page was closed after navigation error');
       }
-      if (String(e.message || '').includes('ERR_ABORTED') || String(e.message || '').includes('Target page')) {
-        await page.waitForTimeout(retryDelayMs);
-        if (page.isClosed()) {
-          throw new Error('Page was closed after navigation error');
-        }
-        try {
-        response = await page.goto(url, { waitUntil: 'commit', timeout: navigationTimeout });
-        } catch (retryError) {
-          if (page.isClosed()) {
-            throw new Error('Page was closed during retry navigation');
-          }
-          throw retryError;
-        }
-      } else {
-        throw e;
+      response = await page.goto(url, { waitUntil: 'commit', timeout: navigationTimeout });
+    } else {
+      throw e;
     }
   }
 
-  // Check response status internally
+  // Verify response status
   if (response) {
-    expect(response.status()).toBe(200);
+    const finalStatus = response.status();
+    const finalUrl = response.url();
+
+    if (finalStatus !== 200) {
+      throw new Error(
+        `Navigation to ${url} returned status ${finalStatus}, expected 200.\n` +
+        `Final URL: ${finalUrl}`
+      );
+    }
+
+    // Check for unexpected redirects (URL changed)
+    if (finalUrl !== url) {
+      // Normalize URLs for comparison (handle trailing slashes, etc.)
+      const normalizeUrl = (u) => u.replace(/\/$/, '').split('?')[0];
+      if (normalizeUrl(finalUrl) !== normalizeUrl(url)) {
+        throw new Error(
+          `Unexpected redirect from ${url} to ${finalUrl}.\n` +
+          `This may indicate an auth issue or plugin redirect.`
+        );
+      }
+    }
+  }
+
+  // Store the requested URL on the page object for later verification
+  page._requestedUrl = url;
+}
+
+/**
+ * Step 2.5: Verify we're still on the requested page (no redirects)
+ * This should be called right after navigation to catch plugin redirects early
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @param {string} requestedUrl - The URL we requested
+ */
+export async function checkSamePage(page, requestedUrl) {
+  const currentUrl = page.url();
+
+  // Normalize URLs for comparison (remove trailing slashes, handle query params)
+  const normalizeForComparison = (url) => {
+    try {
+      const urlObj = new URL(url);
+      // Remove trailing slash from pathname
+      urlObj.pathname = urlObj.pathname.replace(/\/$/, '');
+      return urlObj.toString();
+    } catch {
+      return url;
+    }
+  };
+
+  const normalizedRequested = normalizeForComparison(requestedUrl);
+  const normalizedCurrent = normalizeForComparison(currentUrl);
+
+  if (normalizedCurrent !== normalizedRequested) {
+    throw new Error(
+      `Page redirected from requested URL.\n` +
+      `Requested: ${requestedUrl}\n` +
+      `Current: ${currentUrl}\n` +
+      `This may indicate a plugin (like Crowdsignal) is redirecting to a setup page.`
+    );
   }
 }
 
@@ -1311,25 +1362,35 @@ export async function getPageContentAndPHPErrors(page) {
  * @param {import('@playwright/test').Page} page - Playwright page object
  */
 export async function checkAdminChrome(page) {
-  const adminCheck = await page.evaluate(() => {
+  // Wait for body element to exist first (page might still be loading)
+  // This handles cases where the page is slow to render
+  try {
+    await page.waitForSelector('body', { timeout: 5000, state: 'attached' });
+  } catch {
+    // If body doesn't appear, continue to check anyway
+  }
+
+  // Simple check: just verify the body has the wp-admin class
+  const result = await page.evaluate(() => {
+    const body = document.body;
+    const classList = body ? Array.from(body.classList) : [];
+    const hasAdminBody = body?.classList?.contains('wp-admin') || false;
     return {
-      hasAdminBody: document.body?.classList?.contains('wp-admin') || false,
-      hasAdminBar: !!document.querySelector('#wpadminbar'),
-      hasAdminMenu: !!document.querySelector('#adminmenumain'),
-      hasWpBodyContent: !!document.querySelector('#wpbody-content'),
+      hasAdminBody,
+      bodyClasses: classList,
+      bodyExists: !!body,
     };
   });
 
-  // Assert that at least one admin element is present
-  expect(
-    adminCheck.hasAdminBody ||
-    adminCheck.hasAdminBar ||
-    adminCheck.hasAdminMenu ||
-    adminCheck.hasWpBodyContent
-  ).toBe(true);
-}
-
-/**
+  if (!result.hasAdminBody) {
+    throw new Error(
+      `Admin page missing 'wp-admin' body class.\n` +
+      `Body exists: ${result.bodyExists}\n` +
+      `Actual body classes: [${result.bodyClasses.join(', ')}]\n` +
+      `Expected: body to have class 'wp-admin'`
+    );
+  }
+}/**
  * Step 7: Check authentication (ensure not redirected to login)
  * @param {import('@playwright/test').Page} page - Playwright page object
  * @param {string} path - Page path for error context
@@ -1400,8 +1461,15 @@ export function checkForJavaScriptErrors(consoleErrors, pageErrors, allowConsole
 export async function checkDashboardNotices(page, path) {
   let dashboardNotices = [];
   try {
-    if (!page.isClosed()) {
-      dashboardNotices = await page.evaluate(() => {
+    if (page.isClosed()) {
+      // Page is closed, return empty array
+      return [];
+    }
+
+    // Add a timeout to page.evaluate to prevent hanging
+    // Use a shorter timeout (5 seconds) since this is just DOM querying
+    dashboardNotices = await page.evaluate(
+      () => {
         const notices = [];
         const noticeSelectors = [
           '.notice-error',
@@ -1464,8 +1532,9 @@ export async function checkDashboardNotices(page, path) {
         });
 
         return uniqueNotices;
-      });
-    }
+      },
+      { timeout: 5000 }
+    );
   } catch (err) {
     console.warn('Error while detecting dashboard notices:', err);
   }
@@ -1552,6 +1621,9 @@ export async function compareScreenshotIfNeeded(page, path, pageContent) {
 export async function navigateToPage(page, url, waitUntil = 'load', expectedStatus = 200) {
   const response = await page.goto(url, { waitUntil });
   expect(response.status()).toBe(expectedStatus);
+
+  // Store the requested URL on the page object for later verification
+  page._requestedUrl = url;
 }
 
 /**
@@ -1939,4 +2011,3 @@ export function preparePublicPagesToTest(discoveryData) {
 
   return allPages;
 }
-

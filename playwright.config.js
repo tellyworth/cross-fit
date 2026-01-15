@@ -38,6 +38,8 @@ export default defineConfig({
     trace: TRACE,
     screenshot: SCREENSHOT,
     video: VIDEO,
+    // Use storage state saved by global setup (contains WordPress auth cookies)
+    storageState: './test-results/.auth/storage-state.json',
     // Tighter timeouts reduce long hangs but keep reasonable defaults
     actionTimeout: process.env.PW_ACTION_TIMEOUT ? parseInt(process.env.PW_ACTION_TIMEOUT, 10) : undefined,
     navigationTimeout: process.env.PW_NAV_TIMEOUT ? parseInt(process.env.PW_NAV_TIMEOUT, 10) : undefined,

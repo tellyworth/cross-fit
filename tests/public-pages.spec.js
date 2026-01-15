@@ -2,6 +2,7 @@ import { test, expect } from './wp-fixtures.js';
 import {
   setupErrorTracking,
   navigateToPage,
+  checkSamePage,
   getPageContentAndPHPErrors,
   validatePageTitle,
   validateBodyClass,
@@ -40,8 +41,11 @@ test.describe('WordPress Public Pages', { tag: '@public' }, () => {
         const errorTracking = setupErrorTracking(page);
 
         try {
-          // Step 2: Navigate to page (checks status internally)
+          // Step 2: Navigate to page (checks status internally, asserts no redirect)
           await navigateToPage(page, url, 'load', 200);
+
+          // Step 2.5: Verify we're still on the requested page (catches plugin redirects)
+          await checkSamePage(page, url);
 
           // Step 3: Get page content and detect PHP errors
           const { pageContent, phpErrors } = await getPageContentAndPHPErrors(page);
