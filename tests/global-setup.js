@@ -1,5 +1,7 @@
 import { launchWordPress } from '../src/launcher.js';
 import { chromium } from '@playwright/test';
+import { join } from 'path';
+import { mkdirSync } from 'fs';
 // Removed unused imports from './test-helpers.js'
 
 /**
@@ -39,22 +41,39 @@ async function globalSetup() {
     adminMenuItems: null, // Will be discovered lazily in first test that needs it
   };
 
-  // Trigger discovery file creation by visiting an admin page
-  // This ensures the discovery file exists before parallel tests run
-  console.log('Global setup: Creating discovery file...');
+  // Trigger discovery file creation and capture auth cookies by visiting an admin page
+  // This ensures the discovery file exists and we have auth state before parallel tests run
+  console.log('Global setup: Creating discovery file and capturing auth state...');
+  
+  // Create directory for storage state
+  const storageStatePath = join(process.cwd(), 'test-results', '.auth', 'storage-state.json');
+  try {
+    mkdirSync(join(process.cwd(), 'test-results', '.auth'), { recursive: true });
+  } catch {
+    // Directory may already exist
+  }
+  
   try {
     const browser = await chromium.launch({ headless: true });
     const context = await browser.newContext();
     const page = await context.newPage();
 
-    // Navigate to admin dashboard - this triggers the discovery file creation
+    // Navigate to admin dashboard - this triggers the Playground auto-login
+    // which sets auth cookies and redirects back to the same page
     // Normalize URL to avoid double slashes
     const baseUrl = wpInstance.url.replace(/\/$/, ''); // Remove trailing slash if present
     const adminUrl = `${baseUrl}/wp-admin/`;
-    await page.goto(adminUrl, { waitUntil: 'commit', timeout: 30000 });
+    
+    // Use 'load' to wait for full page load after auto-login redirect completes
+    await page.goto(adminUrl, { waitUntil: 'load', timeout: 30000 });
 
-    // Wait for the discovery file to be written
-    await page.waitForTimeout(2000);
+    // Wait a moment for any additional cookies to be set
+    await page.waitForTimeout(1000);
+
+    // Save the storage state (cookies, localStorage) for use by tests
+    await context.storageState({ path: storageStatePath });
+    process.env.WP_STORAGE_STATE = storageStatePath;
+    console.log(`✓ Auth state saved to ${storageStatePath}`);
 
     // Verify the discovery file exists
     const discoveryUrl = `${baseUrl}/wp-content/big-mistake-discovery.json`;

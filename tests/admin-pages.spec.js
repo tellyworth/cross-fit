@@ -2,6 +2,7 @@ import { test, expect } from './wp-fixtures.js';
 import {
   setupErrorTracking,
   navigateToAdminPage,
+  checkSamePage,
   waitForAdminUI,
   waitForJavaScriptReady,
   getPageContentAndPHPErrors,
@@ -87,8 +88,11 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
         const errorTracking = setupErrorTracking(page);
 
         try {
-          // Step 2: Navigate to admin page (checks status internally)
+          // Step 2: Navigate to admin page (checks status internally, asserts no redirect)
           await navigateToAdminPage(page, url);
+
+          // Step 2.5: Verify we're still on the requested page (catches plugin redirects)
+          await checkSamePage(page, url);
 
           // Step 3: Wait for admin UI elements
           await waitForAdminUI(page);

@@ -582,6 +582,8 @@ export async function launchWordPress() {
           // Disable automatic updates to avoid external requests
           AUTOMATIC_UPDATER_DISABLED: true,
           WP_AUTO_UPDATE_CORE: false,
+          FORCE_SSL_ADMIN: false,
+          FORCE_SSL_LOGIN: false,
         },
       },
       {
