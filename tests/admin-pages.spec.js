@@ -29,7 +29,7 @@ const adminPagesToTest = prepareAdminPagesToTest(discoveryData);
 
 test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
 
-  test.skip('should successfully submit POST request to change site options', async ({ page, wpInstance }) => {
+  test('should successfully submit POST request to change site options', async ({ page, wpInstance }) => {
     // Navigate to General Settings page
     const baseUrl = wpInstance.url.replace(/\/$/, '');
     const optionsPath = '/wp-admin/options-general.php';
