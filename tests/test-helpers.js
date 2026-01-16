@@ -1362,27 +1362,22 @@ export async function getPageContentAndPHPErrors(page) {
  * @param {import('@playwright/test').Page} page - Playwright page object
  */
 export async function checkAdminChrome(page) {
-  // Wait for body element to exist first (page might still be loading)
-  // This handles cases where the page is slow to render
+  // Wait directly for body.wp-admin to avoid race conditions where the body
+  // exists briefly but hasn't received its classes yet (e.g., during React hydration
+  // or when plugins cause slow page loads with external HTTP requests)
   try {
-    await page.waitForSelector('body', { timeout: 5000, state: 'attached' });
+    await page.waitForSelector('body.wp-admin', { timeout: 10000, state: 'attached' });
   } catch {
-    // If body doesn't appear, continue to check anyway
-  }
+    // If body.wp-admin doesn't appear, collect diagnostic info
+    const result = await page.evaluate(() => {
+      const body = document.body;
+      const classList = body ? Array.from(body.classList) : [];
+      return {
+        bodyExists: !!body,
+        bodyClasses: classList,
+      };
+    });
 
-  // Simple check: just verify the body has the wp-admin class
-  const result = await page.evaluate(() => {
-    const body = document.body;
-    const classList = body ? Array.from(body.classList) : [];
-    const hasAdminBody = body?.classList?.contains('wp-admin') || false;
-    return {
-      hasAdminBody,
-      bodyClasses: classList,
-      bodyExists: !!body,
-    };
-  });
-
-  if (!result.hasAdminBody) {
     throw new Error(
       `Admin page missing 'wp-admin' body class.\n` +
       `Body exists: ${result.bodyExists}\n` +
