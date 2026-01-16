@@ -69,9 +69,7 @@ test.describe('WordPress REST API', { tag: '@api' }, () => {
   });
 
   test('should handle POST requests to REST API', async ({ page, wpInstance }) => {
-    // Note: This requires authentication. For now, we'll test that the endpoint exists
-    // In a more complete implementation, we'd add auth headers
-    // Without auth, WordPress may return 200 (with error), 401 (unauthorized), or 403 (forbidden)
+    // Test authenticated POST request to create a draft post
     const result = await testWordPressRESTAPI(page, wpInstance, '/wp-json/wp/v2/posts', {
       method: 'POST',
       body: {
@@ -79,12 +77,13 @@ test.describe('WordPress REST API', { tag: '@api' }, () => {
         content: 'Test content',
         status: 'draft',
       },
-      expectedStatus: 200, // Without auth, WordPress typically returns 200 with error in body
+      expectedStatus: 201, // 201 Created for successful POST
     });
 
-    // Verify that we got a response (even if it's an error)
-    // The endpoint should respond - status could be 200, 201, 401, or 403
-    expect([200, 201, 401, 403]).toContain(result.status);
+    // Verify the post was created
+    expect(result.data.id).toBeTruthy();
+    expect(result.data.title.raw).toBe('Test Post');
+    expect(result.data.status).toBe('draft');
 
     // If we got a response, it should have data (even if it's an error message)
     expect(result.data).toBeTruthy();
