@@ -1215,19 +1215,19 @@ export async function navigateToAdminPage(page, url, retryDelayMs = 500, navigat
   let response;
   try {
     response = await page.goto(url, { waitUntil: 'commit', timeout: navigationTimeout });
-  } catch (e) {
-    if (page.isClosed()) {
-      throw new Error('Page was closed during navigation');
-    }
-    // Retry on ERR_ABORTED or target page errors
-    if (String(e.message || '').includes('ERR_ABORTED') || String(e.message || '').includes('Target page')) {
-      await page.waitForTimeout(retryDelayMs);
+    } catch (e) {
       if (page.isClosed()) {
-        throw new Error('Page was closed after navigation error');
+        throw new Error('Page was closed during navigation');
       }
+    // Retry on ERR_ABORTED or target page errors
+      if (String(e.message || '').includes('ERR_ABORTED') || String(e.message || '').includes('Target page')) {
+        await page.waitForTimeout(retryDelayMs);
+        if (page.isClosed()) {
+          throw new Error('Page was closed after navigation error');
+        }
       response = await page.goto(url, { waitUntil: 'commit', timeout: navigationTimeout });
-    } else {
-      throw e;
+      } else {
+        throw e;
     }
   }
 
@@ -1752,13 +1752,34 @@ export async function testWordPressRESTAPI(page, wpInstance, path, options = {})
     validateResponse = null,
   } = options;
 
+  // For write operations (POST/PUT/DELETE), we need a nonce for CSRF protection
+  // Navigate to an admin page and extract the nonce from wpApiSettings
+  let nonce = null;
+  if (['POST', 'PUT', 'DELETE'].includes(method.toUpperCase())) {
+    const adminUrl = normalizePath(wpInstance.url, '/wp-admin/');
 
-  // Make API request using Playwright's APIRequestContext
-  // page.request is an APIRequestContext that provides get(), post(), etc.
+    // Navigate to admin page if not already there
+    if (!page.url().includes('/wp-admin/')) {
+      await page.goto(adminUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    }
+
+    // Extract nonce from wpApiSettings
+    try {
+      nonce = await page.evaluate(() => {
+        // wpApiSettings is set by WordPress on admin pages
+        return window.wpApiSettings?.nonce || null;
+      });
+    } catch (e) {
+      // Nonce extraction failed - request will proceed without it
+    }
+  }
+
+  // Make API request using page.request (shares cookies with page context)
   let response;
 
   const requestHeaders = {
     'Content-Type': 'application/json',
+    ...(nonce ? { 'X-WP-Nonce': nonce } : {}),
     ...headers,
   };
 
@@ -1786,9 +1807,11 @@ export async function testWordPressRESTAPI(page, wpInstance, path, options = {})
   }
 
   const status = response.status();
+  const responseHeaders = response.headers();
+
   if (status !== expectedStatus) {
     // Get error details for debugging
-    const contentType = response.headers()['content-type'] || '';
+    const contentType = responseHeaders['content-type'] || '';
     let errorBody = '';
     try {
       if (contentType.includes('json')) {
