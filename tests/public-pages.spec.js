@@ -1,6 +1,7 @@
 import { test, expect } from './wp-fixtures.js';
 import {
   setupErrorTracking,
+  setupResourceTracking,
   navigateToPage,
   checkSamePage,
   getPageContentAndPHPErrors,
@@ -12,6 +13,7 @@ import {
   normalizePath,
   loadDiscoveryDataSync,
   preparePublicPagesToTest,
+  getResourceMetrics,
 } from './test-helpers.js';
 
 /**
@@ -37,8 +39,9 @@ test.describe('WordPress Public Pages', { tag: '@public' }, () => {
       test(`public page: ${pageItem.description} (${pageItem.path})`, { tag: pageItem.path === '/' ? '@smoke' : undefined }, async ({ page, wpInstance }) => {
         const url = normalizePath(wpInstance.url, pageItem.path);
 
-        // Step 1: Set up error tracking
+        // Step 1: Set up error tracking and resource tracking
         const errorTracking = setupErrorTracking(page);
+        const resourceTracking = setupResourceTracking(page);
 
         try {
           // Step 2: Navigate to page (checks status internally, asserts no redirect)
@@ -73,9 +76,20 @@ test.describe('WordPress Public Pages', { tag: '@public' }, () => {
 
           // Step 8: Compare screenshot if needed
           await compareScreenshotPublic(page, pageItem.path, pageContent, false);
+
+          // Step 9: Log resource metrics
+          const metrics = await getResourceMetrics(page, resourceTracking.resourceSizes);
+          const formatBytes = (bytes) => (bytes / 1024).toFixed(1) + 'KB';
+          console.log(
+            `[${pageItem.path}] Total: ${formatBytes(metrics.totalSize)} | ` +
+            `JS: ${metrics.jsCount} (${formatBytes(metrics.jsSize)}) | ` +
+            `CSS: ${metrics.cssCount} (${formatBytes(metrics.cssSize)}) | ` +
+            `Images: ${metrics.imageCount} (${formatBytes(metrics.imageSize)})`
+          );
         } finally {
-          // Cleanup error tracking listeners
+          // Cleanup error tracking and resource tracking listeners
           errorTracking.cleanup();
+          resourceTracking.cleanup();
         }
       });
     });
