@@ -1743,6 +1743,46 @@ export function setupResourceTracking(page) {
 }
 
 /**
+ * Get list of JavaScript scripts loaded on the page
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @param {Map} resourceSizes - Optional map of URL -> size from response tracking
+ * @returns {Promise<Array>} Array of script objects with url, size, and type
+ */
+export async function getJavaScriptScripts(page, resourceSizes = null) {
+  return await page.evaluate((trackedSizes) => {
+    const resources = performance.getEntriesByType('resource');
+
+    // Helper to get size
+    const getSize = (entry, url) => {
+      if (trackedSizes && trackedSizes[url]) {
+        return trackedSizes[url];
+      }
+      if (entry.transferSize && entry.transferSize > 0) {
+        return entry.transferSize;
+      }
+      if (entry.encodedBodySize && entry.encodedBodySize > 0) {
+        return entry.encodedBodySize;
+      }
+      if (entry.decodedBodySize && entry.decodedBodySize > 0) {
+        return entry.decodedBodySize;
+      }
+      return 0;
+    };
+
+    const jsResources = resources.filter(r =>
+      r.name.endsWith('.js') || r.initiatorType === 'script'
+    );
+
+    return jsResources.map(r => ({
+      url: r.name,
+      size: getSize(r, r.name),
+      initiatorType: r.initiatorType,
+      duration: r.duration,
+    })).sort((a, b) => b.size - a.size); // Sort by size descending
+  }, resourceSizes ? Object.fromEntries(resourceSizes) : null);
+}
+
+/**
  * Get resource metrics using the browser's Performance API
  * Combines with Playwright response tracking for more accurate sizes
  * Returns total page size, JS/CSS/image counts and sizes
