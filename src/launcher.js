@@ -646,6 +646,97 @@ file_put_contents($log_path, $header, FILE_APPEND | LOCK_EX);
       allSteps.push(...userBlueprint.steps);
     }
 
+    // Patch wp-includes/functions.wp-scripts.php to add a hook before _wp_scripts_maybe_doing_it_wrong()
+    // This allows us to capture backtraces when wp_enqueue_script() is called
+    allSteps.push({
+      step: 'runPHP',
+      code: `<?php
+// Patch wp-includes/functions.wp-scripts.php to add debugging hook
+$file_path = '/wordpress/wp-includes/functions.wp-scripts.php';
+$log_path = '/wordpress/wp-content/debug.log';
+if (file_exists($file_path)) {
+  $content = file_get_contents($file_path);
+
+  // Find the wp_enqueue_script() function definition and add hook right after it
+  // The function signature is: function wp_enqueue_script( $handle, $src = '', $deps = array(), $ver = false, $args = array() )
+  // We want to add our hook call right after the opening brace
+  // First, find the function name, then locate the opening brace (handles nested parentheses in parameters)
+  $function_name_pos = strpos($content, 'function wp_enqueue_script');
+
+  if ($function_name_pos !== false) {
+    // Find the opening brace after the function definition
+    // Start from the function name and look for the opening brace
+    $brace_pos = strpos($content, '{', $function_name_pos);
+
+    if ($brace_pos !== false) {
+      // Verify this is the function definition brace by checking there's a closing paren before it
+      $paren_pos = strrpos(substr($content, $function_name_pos, $brace_pos - $function_name_pos), ')');
+      if ($paren_pos !== false) {
+        // This looks like the function definition brace
+        // Find the end of the line (or next non-whitespace character)
+        $line_end = strpos($content, PHP_EOL, $brace_pos);
+        if ($line_end === false) {
+          $line_end = strlen($content);
+        }
+
+        // Get the line after the function definition to determine indentation
+        $next_line_start = $line_end + strlen(PHP_EOL);
+        $next_line = '';
+        $next_line_end = strpos($content, PHP_EOL, $next_line_start);
+        if ($next_line_end !== false) {
+          $next_line = substr($content, $next_line_start, $next_line_end - $next_line_start);
+        }
+
+        // Determine indentation from the next line (should be a tab)
+        $indent = '	';
+        if (preg_match('/^(\\t|\\s+)/', $next_line, $indent_match)) {
+          $indent = $indent_match[1];
+        }
+
+        // Build the hook call
+        // Note: wp_enqueue_script signature is: $handle, $src, $deps, $ver, $args
+        // We need to escape $ signs properly: in PHP string, \\$ becomes \$ in the file
+        $hook_name = 'big_mistake_wp_enqueue_script';
+        $hook_call = $indent . 'do_action(' . chr(39) . $hook_name . chr(39) . ', $handle, $src, $deps, $ver, $args);' . PHP_EOL;
+
+        // Insert the hook call right after the opening brace
+        $content = substr_replace($content, $hook_call, $brace_pos + 1, 0);
+        file_put_contents($file_path, $content);
+
+        // Log success
+        if (file_exists($log_path)) {
+          file_put_contents($log_path, '[Big Mistake] Successfully patched functions.wp-scripts.php (added hook after wp_enqueue_script function definition)' . PHP_EOL, FILE_APPEND);
+        }
+      } else {
+        if (file_exists($log_path)) {
+          file_put_contents($log_path, '[Big Mistake] WARNING: Found function but could not verify opening brace' . PHP_EOL, FILE_APPEND);
+        }
+      }
+    } else {
+      if (file_exists($log_path)) {
+        file_put_contents($log_path, '[Big Mistake] WARNING: Found function name but could not locate opening brace' . PHP_EOL, FILE_APPEND);
+      }
+    }
+  } else {
+    if (file_exists($log_path)) {
+      // Log that we couldn't find the pattern
+      file_put_contents($log_path, '[Big Mistake] WARNING: Could not find wp_enqueue_script() function definition in functions.wp-scripts.php' . PHP_EOL, FILE_APPEND);
+      // Try to find if the function exists at all (for debugging)
+      if (preg_match('/function\\s+wp_enqueue_script/', $content)) {
+        file_put_contents($log_path, '[Big Mistake] DEBUG: Found "function wp_enqueue_script" but pattern did not match - checking format...' . PHP_EOL, FILE_APPEND);
+        // Try to extract a sample of the function definition
+        if (preg_match('/function\\s+wp_enqueue_script[^\\{]{0,200}/', $content, $sample_match)) {
+          file_put_contents($log_path, '[Big Mistake] DEBUG: Sample: ' . substr($sample_match[0], 0, 100) . '...' . PHP_EOL, FILE_APPEND);
+        }
+      } else {
+        file_put_contents($log_path, '[Big Mistake] DEBUG: Function "wp_enqueue_script" not found in file at all' . PHP_EOL, FILE_APPEND);
+      }
+    }
+  }
+}
+`,
+    });
+
     // Add final step to generate discovery file synchronously
     // This ensures the discovery file exists before any tests run, allowing us to read it
     // synchronously in test files and use Playwright's forEach pattern for individual test() calls

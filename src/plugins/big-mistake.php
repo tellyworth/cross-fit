@@ -462,6 +462,166 @@ function big_mistake_disable_heartbeat() {
 add_action('init', 'big_mistake_disable_heartbeat', 1);
 
 /**
+ * Debug: Log scripts enqueued via wp_enqueue_script
+ * This helps identify which scripts are being loaded on admin pages
+ */
+function big_mistake_log_enqueued_scripts($handle, $src = '', $deps = array(), $version = false, $in_footer = false) {
+  // Only log on options-general.php page
+  global $pagenow;
+  if ($pagenow !== 'options-general.php') {
+    return;
+  }
+
+  // Get the full URL if src is relative
+  $script_url = $src;
+  if ($src && !preg_match('#^(https?:)?//#', $src)) {
+    $script_url = site_url($src);
+  }
+
+  error_log(sprintf(
+    '[Big Mistake] wp_enqueue_script: handle=%s, src=%s, deps=%s, version=%s, in_footer=%s',
+    $handle,
+    $script_url ?: '(inline)',
+    implode(',', $deps),
+    $version ?: 'none',
+    $in_footer ? 'yes' : 'no'
+  ));
+}
+
+// Track script enqueues using monkey patch hook (added to wp_enqueue_script() via blueprint)
+global $big_mistake_script_tracking;
+$big_mistake_script_tracking = array();
+
+// Hook into big_mistake_wp_enqueue_script action (added via monkey patch to wp_enqueue_script())
+// This allows us to capture backtraces showing where each script is enqueued from
+// Note: wp_enqueue_script signature is: $handle, $src, $deps, $ver, $args
+add_action('big_mistake_wp_enqueue_script', function($handle, $src, $deps, $ver, $args) {
+  global $pagenow;
+
+  // Debug: log that the hook was called
+  error_log(sprintf('[Big Mistake] big_mistake_wp_enqueue_script hook called for handle "%s" (pagenow=%s)', $handle, $pagenow));
+
+  if ($pagenow !== 'options-general.php') {
+    return;
+  }
+
+         // Get full backtrace to see where wp_enqueue_script() was called from
+         $backtrace = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 20);
+
+         // Log full backtrace for debugging
+         error_log(sprintf('[Big Mistake] Full backtrace for handle "%s":', $handle));
+         foreach ($backtrace as $index => $frame) {
+           $file = isset($frame['file']) ? $frame['file'] : 'unknown';
+           $line = isset($frame['line']) ? $frame['line'] : 'unknown';
+           $function = isset($frame['function']) ? $frame['function'] : 'unknown';
+           $class = isset($frame['class']) ? $frame['class'] . '::' : '';
+           $type = isset($frame['type']) ? $frame['type'] : '';
+
+           // Make path relative
+           if (strpos($file, ABSPATH) === 0) {
+             $file = substr($file, strlen(ABSPATH));
+           }
+
+           error_log(sprintf('  #%d %s%s%s() at %s:%s', $index, $class, $type, $function, $file, $line));
+         }
+
+         // Find the first non-WordPress-core frame (where the script was actually enqueued)
+         $enqueue_location = 'unknown';
+         foreach ($backtrace as $frame) {
+           if (isset($frame['file'])) {
+             $file = $frame['file'];
+
+             // Skip WordPress core and this plugin
+             if (strpos($file, WPINC) === false &&
+                 strpos($file, ABSPATH . 'wp-admin') === false &&
+                 strpos($file, 'big-mistake.php') === false &&
+                 strpos($file, 'class-wp-scripts.php') === false &&
+                 strpos($file, 'functions.wp-scripts.php') === false) {
+
+               // Make path relative
+               if (strpos($file, ABSPATH) === 0) {
+                 $file = substr($file, strlen(ABSPATH));
+               }
+
+               $line = isset($frame['line']) ? $frame['line'] : 'unknown';
+               $function = isset($frame['function']) ? $frame['function'] : 'unknown';
+               $class = isset($frame['class']) ? $frame['class'] . '::' : '';
+               $type = isset($frame['type']) ? $frame['type'] : '';
+
+               $enqueue_location = sprintf('%s%s%s() at %s:%s', $class, $type, $function, $file, $line);
+               break;
+             }
+           }
+         }
+
+         error_log(sprintf(
+           '[Big Mistake] wp_enqueue_script() called for handle "%s" from: %s',
+           $handle,
+           $enqueue_location
+         ));
+
+  // Store for later use
+  global $big_mistake_script_tracking;
+  if (!isset($big_mistake_script_tracking['script_sources'])) {
+    $big_mistake_script_tracking['script_sources'] = array();
+  }
+  if (!isset($big_mistake_script_tracking['script_sources'][$handle])) {
+    $big_mistake_script_tracking['script_sources'][$handle] = $enqueue_location;
+  }
+}, 10, 5);
+
+// Log final summary of all queued scripts with their enqueue locations
+add_action('admin_enqueue_scripts', function($hook) {
+  global $pagenow, $wp_scripts, $big_mistake_script_tracking;
+
+  if ($pagenow !== 'options-general.php') {
+    return;
+  }
+
+  if (!isset($wp_scripts) || !is_a($wp_scripts, 'WP_Scripts')) {
+    return;
+  }
+
+  // Log all queued scripts with their enqueue locations
+  $queued = array();
+  foreach ($wp_scripts->queue as $handle) {
+    if (isset($wp_scripts->registered[$handle])) {
+      $script = $wp_scripts->registered[$handle];
+      $src = $script->src;
+      if ($src && !preg_match('#^(https?:)?//#', $src)) {
+        $src = site_url($src);
+      }
+
+      $queued[] = array(
+        'handle' => $handle,
+        'src' => $src ?: '(inline)',
+        'deps' => $script->deps,
+        'version' => $script->ver ?: 'none',
+      );
+    }
+  }
+
+  error_log(sprintf('[Big Mistake] Final queued scripts (%d):', count($queued)));
+
+  // Get enqueue locations we captured from big_mistake_wp_enqueue_script hook
+  $script_sources = isset($big_mistake_script_tracking['script_sources']) ? $big_mistake_script_tracking['script_sources'] : array();
+
+  foreach ($queued as $index => $script) {
+    $location = isset($script_sources[$script['handle']]) ? $script_sources[$script['handle']] : 'unknown';
+    error_log(sprintf(
+      '  %d. handle=%s, src=%s, deps=%s, version=%s, enqueued_from=%s',
+      $index + 1,
+      $script['handle'],
+      $script['src'],
+      implode(',', $script['deps']),
+      $script['version'],
+      $location
+    ));
+  }
+}, 999);
+
+
+/**
  * Disable WordPress compression test AJAX request
  * WordPress checks get_site_option('can_compress_scripts') in admin-footer.php
  * If it returns false, compression_test() is called. We use filters to ensure it returns true.
