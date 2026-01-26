@@ -492,75 +492,118 @@ function big_mistake_log_enqueued_scripts($handle, $src = '', $deps = array(), $
 global $big_mistake_script_tracking;
 $big_mistake_script_tracking = array();
 
+// Log wp_redirect calls with backtrace to identify redirect sources
+// wp_redirect() applies a filter, so we hook into that
+add_filter('wp_redirect', function($location, $status = 302) {
+  // Get full backtrace to see where wp_redirect() was called from
+  $backtrace = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 20);
+
+  // Find the wp_redirect() call in the backtrace
+  $wp_redirect_index = -1;
+  foreach ($backtrace as $index => $frame) {
+    if (isset($frame['function']) && $frame['function'] === 'wp_redirect') {
+      $wp_redirect_index = $index;
+      break;
+    }
+  }
+
+  if ($wp_redirect_index >= 0) {
+    // Display wp_redirect() call with its arguments
+    $frame = $backtrace[$wp_redirect_index];
+    $file = isset($frame['file']) ? $frame['file'] : 'unknown';
+    $line = isset($frame['line']) ? $frame['line'] : 'unknown';
+
+    // Make path relative
+    if (strpos($file, ABSPATH) === 0) {
+      $file = substr($file, strlen(ABSPATH));
+    }
+
+    error_log(sprintf('  #%d wp_redirect(\'%s\', %d) at %s:%s', $wp_redirect_index, $location, $status, $file, $line));
+
+    // Display the remainder of the call stack
+    for ($i = $wp_redirect_index + 1; $i < count($backtrace); $i++) {
+      $frame = $backtrace[$i];
+      $file = isset($frame['file']) ? $frame['file'] : 'unknown';
+      $line = isset($frame['line']) ? $frame['line'] : 'unknown';
+      $function = isset($frame['function']) ? $frame['function'] : 'unknown';
+      $class = isset($frame['class']) ? $frame['class'] . '::' : '';
+      $type = isset($frame['type']) ? $frame['type'] : '';
+
+      // Make path relative
+      if (strpos($file, ABSPATH) === 0) {
+        $file = substr($file, strlen(ABSPATH));
+      }
+
+      // For do_action and apply_filters, show the hook name (first argument)
+      $function_display = $function;
+      if (($function === 'do_action' || $function === 'apply_filters') && isset($frame['args'][0])) {
+        $hook_name = $frame['args'][0];
+        if (is_string($hook_name) && $hook_name !== '') {
+          if (isset($frame['class'])) {
+            $function_display = sprintf('%s::%s(\'%s\')', $frame['class'], $function, $hook_name);
+          } else {
+            $function_display = sprintf('%s(\'%s\')', $function, $hook_name);
+          }
+        } else {
+          if (isset($frame['class'])) {
+            $function_display = sprintf('%s::%s(...)', $frame['class'], $function);
+          } else {
+            $function_display = sprintf('%s(...)', $function);
+          }
+        }
+      } else {
+        $function_display = $function . '()';
+      }
+
+      error_log(sprintf('  #%d %s%s%s at %s:%s', $i, $class, $type, $function_display, $file, $line));
+    }
+  } else {
+    error_log('  (wp_redirect() not found in backtrace)');
+  }
+
+  // Return the location unchanged (we're just logging, not modifying)
+  return $location;
+}, 10, 2);
+
 // Hook into big_mistake_wp_enqueue_script action (added via monkey patch to wp_enqueue_script())
-// This allows us to capture backtraces showing where each script is enqueued from
+// This allows us to capture where each script is enqueued from without logging full backtraces
 // Note: wp_enqueue_script signature is: $handle, $src, $deps, $ver, $args
 add_action('big_mistake_wp_enqueue_script', function($handle, $src, $deps, $ver, $args) {
   global $pagenow;
 
-  // Debug: log that the hook was called
-  error_log(sprintf('[Big Mistake] big_mistake_wp_enqueue_script hook called for handle "%s" (pagenow=%s)', $handle, $pagenow));
+  // Get backtrace so we can find the first non-core frame where the script was enqueued
+  $backtrace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 20);
 
-  if ($pagenow !== 'options-general.php') {
-    return;
+  // Find the first non-WordPress-core frame (where the script was actually enqueued)
+  $enqueue_location = 'unknown';
+  foreach ($backtrace as $frame) {
+    if (isset($frame['file'])) {
+      $file = $frame['file'];
+
+      // Skip WordPress core and this plugin
+      if (strpos($file, WPINC) === false &&
+          strpos($file, ABSPATH . 'wp-admin') === false &&
+          strpos($file, 'big-mistake.php') === false &&
+          strpos($file, 'class-wp-scripts.php') === false &&
+          strpos($file, 'functions.wp-scripts.php') === false) {
+
+        // Make path relative
+        if (strpos($file, ABSPATH) === 0) {
+          $file = substr($file, strlen(ABSPATH));
+        }
+
+        $line = isset($frame['line']) ? $frame['line'] : 'unknown';
+        $function = isset($frame['function']) ? $frame['function'] : 'unknown';
+        $class = isset($frame['class']) ? $frame['class'] . '::' : '';
+        $type = isset($frame['type']) ? $frame['type'] : '';
+
+        $enqueue_location = sprintf('%s%s%s() at %s:%s', $class, $type, $function, $file, $line);
+        break;
+      }
+    }
   }
 
-         // Get full backtrace to see where wp_enqueue_script() was called from
-         $backtrace = debug_backtrace(DEBUG_BACKTRACE_PROVIDE_OBJECT, 20);
-
-         // Log full backtrace for debugging
-         error_log(sprintf('[Big Mistake] Full backtrace for handle "%s":', $handle));
-         foreach ($backtrace as $index => $frame) {
-           $file = isset($frame['file']) ? $frame['file'] : 'unknown';
-           $line = isset($frame['line']) ? $frame['line'] : 'unknown';
-           $function = isset($frame['function']) ? $frame['function'] : 'unknown';
-           $class = isset($frame['class']) ? $frame['class'] . '::' : '';
-           $type = isset($frame['type']) ? $frame['type'] : '';
-
-           // Make path relative
-           if (strpos($file, ABSPATH) === 0) {
-             $file = substr($file, strlen(ABSPATH));
-           }
-
-           error_log(sprintf('  #%d %s%s%s() at %s:%s', $index, $class, $type, $function, $file, $line));
-         }
-
-         // Find the first non-WordPress-core frame (where the script was actually enqueued)
-         $enqueue_location = 'unknown';
-         foreach ($backtrace as $frame) {
-           if (isset($frame['file'])) {
-             $file = $frame['file'];
-
-             // Skip WordPress core and this plugin
-             if (strpos($file, WPINC) === false &&
-                 strpos($file, ABSPATH . 'wp-admin') === false &&
-                 strpos($file, 'big-mistake.php') === false &&
-                 strpos($file, 'class-wp-scripts.php') === false &&
-                 strpos($file, 'functions.wp-scripts.php') === false) {
-
-               // Make path relative
-               if (strpos($file, ABSPATH) === 0) {
-                 $file = substr($file, strlen(ABSPATH));
-               }
-
-               $line = isset($frame['line']) ? $frame['line'] : 'unknown';
-               $function = isset($frame['function']) ? $frame['function'] : 'unknown';
-               $class = isset($frame['class']) ? $frame['class'] . '::' : '';
-               $type = isset($frame['type']) ? $frame['type'] : '';
-
-               $enqueue_location = sprintf('%s%s%s() at %s:%s', $class, $type, $function, $file, $line);
-               break;
-             }
-           }
-         }
-
-         error_log(sprintf(
-           '[Big Mistake] wp_enqueue_script() called for handle "%s" from: %s',
-           $handle,
-           $enqueue_location
-         ));
-
-  // Store for later use
+  // Store for later use in the final summary
   global $big_mistake_script_tracking;
   if (!isset($big_mistake_script_tracking['script_sources'])) {
     $big_mistake_script_tracking['script_sources'] = array();
@@ -570,7 +613,7 @@ add_action('big_mistake_wp_enqueue_script', function($handle, $src, $deps, $ver,
   }
 }, 10, 5);
 
-// Log final summary of all queued scripts with their enqueue locations
+// Log final summary of plugin-enqueued scripts with their enqueue locations
 add_action('admin_enqueue_scripts', function($hook) {
   global $pagenow, $wp_scripts, $big_mistake_script_tracking;
 
@@ -582,7 +625,7 @@ add_action('admin_enqueue_scripts', function($hook) {
     return;
   }
 
-  // Log all queued scripts with their enqueue locations
+  // Collect all queued scripts with their enqueue locations
   $queued = array();
   foreach ($wp_scripts->queue as $handle) {
     if (isset($wp_scripts->registered[$handle])) {
@@ -606,8 +649,19 @@ add_action('admin_enqueue_scripts', function($hook) {
   // Get enqueue locations we captured from big_mistake_wp_enqueue_script hook
   $script_sources = isset($big_mistake_script_tracking['script_sources']) ? $big_mistake_script_tracking['script_sources'] : array();
 
-  foreach ($queued as $index => $script) {
-    $location = isset($script_sources[$script['handle']]) ? $script_sources[$script['handle']] : 'unknown';
+  // Filter to only scripts enqueued by plugins / non-core code (i.e. those with a known, non-core location)
+  $plugin_enqueued = array();
+  foreach ($queued as $script) {
+    $handle = $script['handle'];
+    if (isset($script_sources[$handle]) && $script_sources[$handle] !== 'unknown') {
+      $script['enqueued_from'] = $script_sources[$handle];
+      $plugin_enqueued[] = $script;
+    }
+  }
+
+  error_log(sprintf('[Big Mistake] Plugin enqueued scripts (%d):', count($plugin_enqueued)));
+
+  foreach ($plugin_enqueued as $index => $script) {
     error_log(sprintf(
       '  %d. handle=%s, src=%s, deps=%s, version=%s, enqueued_from=%s',
       $index + 1,
@@ -615,7 +669,7 @@ add_action('admin_enqueue_scripts', function($hook) {
       $script['src'],
       implode(',', $script['deps']),
       $script['version'],
-      $location
+      $script['enqueued_from']
     ));
   }
 }, 999);
@@ -639,6 +693,15 @@ add_filter('default_option_can_compress_scripts', 'big_mistake_filter_can_compre
 // Also filter site option for multisite
 add_filter('site_option_can_compress_scripts', 'big_mistake_filter_can_compress_scripts');
 add_filter('default_site_option_can_compress_scripts', 'big_mistake_filter_can_compress_scripts');
+
+/**
+ * Prevent Crowdsignal Forms plugin from redirecting to settings page on first admin load
+ * The plugin sets crowdsignal_forms_do_activation_redirect option on activation and redirects
+ * if it's truthy. We force it to always return false to prevent the redirect.
+ */
+add_filter('option_crowdsignal_forms_do_activation_redirect', function($value) {
+  return false;
+});
 
 
 /**

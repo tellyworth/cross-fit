@@ -17,6 +17,7 @@ import {
   loadDiscoveryDataSync,
   prepareAdminPagesToTest,
   getResourceMetrics,
+  getJavaScriptScripts,
 } from './test-helpers.js';
 
 /**
@@ -139,6 +140,15 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
             `CSS: ${metrics.cssCount} (${formatBytes(metrics.cssSize)}) | ` +
             `Images: ${metrics.imageCount} (${formatBytes(metrics.imageSize)})`
           );
+
+          // Step 13: Log JS scripts for options-general.php (temp debugging)
+          if (pageItem.path === '/wp-admin/options-general.php') {
+            const jsScripts = await getJavaScriptScripts(page, resourceTracking.resourceSizes);
+            console.log(`\n[${pageItem.path}] Loaded JS Scripts (${jsScripts.length} total):`);
+            jsScripts.forEach((script, index) => {
+              console.log(`  ${index + 1}. ${formatBytes(script.size)} - ${script.url} (${script.initiatorType})`);
+            });
+          }
         } finally {
           // Cleanup error tracking and resource tracking listeners
           errorTracking.cleanup();
