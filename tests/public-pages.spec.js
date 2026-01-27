@@ -39,9 +39,10 @@ test.describe('WordPress Public Pages', { tag: '@public' }, () => {
       test(`public page: ${pageItem.description} (${pageItem.path})`, { tag: pageItem.path === '/' ? '@smoke' : undefined }, async ({ page, wpInstance }) => {
         const url = normalizePath(wpInstance.url, pageItem.path);
 
-        // Step 1: Set up error tracking and resource tracking
+        // Step 1: Set up error tracking
         const errorTracking = setupErrorTracking(page);
-        const resourceTracking = setupResourceTracking(page);
+        // Set up resource tracking only when script tracking is enabled
+        const resourceTracking = process.env.SCRIPT_TRACKING === '1' ? setupResourceTracking(page) : null;
 
         try {
           // Step 2: Navigate to page (checks status internally, asserts no redirect)
@@ -77,19 +78,24 @@ test.describe('WordPress Public Pages', { tag: '@public' }, () => {
           // Step 8: Compare screenshot if needed
           await compareScreenshotPublic(page, pageItem.path, pageContent, false);
 
-          // Step 9: Log resource metrics
-          const metrics = await getResourceMetrics(page, resourceTracking.resourceSizes);
-          const formatBytes = (bytes) => (bytes / 1024).toFixed(1) + 'KB';
-          console.log(
-            `[${pageItem.path}] Total: ${formatBytes(metrics.totalSize)} | ` +
-            `JS: ${metrics.jsCount} (${formatBytes(metrics.jsSize)}) | ` +
-            `CSS: ${metrics.cssCount} (${formatBytes(metrics.cssSize)}) | ` +
-            `Images: ${metrics.imageCount} (${formatBytes(metrics.imageSize)})`
-          );
+          // Step 9: Log resource metrics (only when script tracking is enabled)
+          if (process.env.SCRIPT_TRACKING === '1' && resourceTracking) {
+            const metrics = await getResourceMetrics(page, resourceTracking.resourceSizes);
+            const formatBytes = (bytes) => (bytes / 1024).toFixed(1) + 'KB';
+            console.log(
+              `[${pageItem.path}] Total: ${formatBytes(metrics.totalSize)} | ` +
+              `JS: ${metrics.jsCount} (${formatBytes(metrics.jsSize)}) | ` +
+              `CSS: ${metrics.cssCount} (${formatBytes(metrics.cssSize)}) | ` +
+              `Images: ${metrics.imageCount} (${formatBytes(metrics.imageSize)})`
+            );
+          }
         } finally {
-          // Cleanup error tracking and resource tracking listeners
+          // Cleanup error tracking listeners
           errorTracking.cleanup();
-          resourceTracking.cleanup();
+          // Cleanup resource tracking listeners if they were set up
+          if (resourceTracking) {
+            resourceTracking.cleanup();
+          }
         }
       });
     });
