@@ -1617,6 +1617,33 @@ export async function navigateToPage(page, url, waitUntil = 'load', expectedStat
   const response = await page.goto(url, { waitUntil });
   expect(response.status()).toBe(expectedStatus);
 
+  // Check for unexpected redirects (URL changed)
+  if (response) {
+    const finalUrl = response.url();
+    
+    // Normalize URLs for comparison (handle trailing slashes, etc.)
+    const normalizeUrl = (u) => {
+      try {
+        const urlObj = new URL(u);
+        // Remove trailing slash from pathname
+        urlObj.pathname = urlObj.pathname.replace(/\/$/, '');
+        return urlObj.toString();
+      } catch {
+        return u.replace(/\/$/, '').split('?')[0];
+      }
+    };
+
+    const normalizedRequested = normalizeUrl(url);
+    const normalizedFinal = normalizeUrl(finalUrl);
+
+    if (normalizedFinal !== normalizedRequested) {
+      throw new Error(
+        `Unexpected redirect from ${url} to ${finalUrl}.\n` +
+        `This may indicate a plugin redirect or authentication issue.`
+      );
+    }
+  }
+
   // Store the requested URL on the page object for later verification
   page._requestedUrl = url;
 }
