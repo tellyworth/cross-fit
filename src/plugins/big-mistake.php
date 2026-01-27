@@ -468,9 +468,6 @@ add_action('init', 'big_mistake_disable_heartbeat', 1);
 function big_mistake_log_enqueued_scripts($handle, $src = '', $deps = array(), $version = false, $in_footer = false) {
   // Only log on options-general.php page
   global $pagenow;
-  if ($pagenow !== 'options-general.php') {
-    return;
-  }
 
   // Get the full URL if src is relative
   $script_url = $src;
@@ -489,6 +486,7 @@ function big_mistake_log_enqueued_scripts($handle, $src = '', $deps = array(), $
 }
 
 // Track script enqueues using monkey patch hook (added to wp_enqueue_script() via blueprint)
+// Only enabled when WP_SCRIPT_TRACKING constant is true
 global $big_mistake_script_tracking;
 $big_mistake_script_tracking = array();
 
@@ -568,7 +566,9 @@ add_filter('wp_redirect', function($location, $status = 302) {
 // Hook into big_mistake_wp_enqueue_script action (added via monkey patch to wp_enqueue_script())
 // This allows us to capture where each script is enqueued from without logging full backtraces
 // Note: wp_enqueue_script signature is: $handle, $src, $deps, $ver, $args
-add_action('big_mistake_wp_enqueue_script', function($handle, $src, $deps, $ver, $args) {
+// Only enabled when WP_SCRIPT_TRACKING constant is true
+if (defined('WP_SCRIPT_TRACKING') && WP_SCRIPT_TRACKING) {
+  add_action('big_mistake_wp_enqueue_script', function($handle, $src, $deps, $ver, $args) {
   global $pagenow;
 
   // Get backtrace so we can find the first non-core frame where the script was enqueued
@@ -611,15 +611,11 @@ add_action('big_mistake_wp_enqueue_script', function($handle, $src, $deps, $ver,
   if (!isset($big_mistake_script_tracking['script_sources'][$handle])) {
     $big_mistake_script_tracking['script_sources'][$handle] = $enqueue_location;
   }
-}, 10, 5);
+  }, 10, 5);
 
-// Log final summary of plugin-enqueued scripts with their enqueue locations
-add_action('admin_enqueue_scripts', function($hook) {
+  // Log final summary of plugin-enqueued scripts with their enqueue locations
+  add_action('admin_enqueue_scripts', function($hook) {
   global $pagenow, $wp_scripts, $big_mistake_script_tracking;
-
-  if ($pagenow !== 'options-general.php') {
-    return;
-  }
 
   if (!isset($wp_scripts) || !is_a($wp_scripts, 'WP_Scripts')) {
     return;
@@ -644,8 +640,6 @@ add_action('admin_enqueue_scripts', function($hook) {
     }
   }
 
-  error_log(sprintf('[Big Mistake] Final queued scripts (%d):', count($queued)));
-
   // Get enqueue locations we captured from big_mistake_wp_enqueue_script hook
   $script_sources = isset($big_mistake_script_tracking['script_sources']) ? $big_mistake_script_tracking['script_sources'] : array();
 
@@ -659,7 +653,7 @@ add_action('admin_enqueue_scripts', function($hook) {
     }
   }
 
-  error_log(sprintf('[Big Mistake] Plugin enqueued scripts (%d):', count($plugin_enqueued)));
+  error_log(sprintf('[Big Mistake] Plugin enqueued scripts (%d) on %s:', count($plugin_enqueued), $pagenow));
 
   foreach ($plugin_enqueued as $index => $script) {
     error_log(sprintf(
@@ -672,7 +666,8 @@ add_action('admin_enqueue_scripts', function($hook) {
       $script['enqueued_from']
     ));
   }
-}, 999);
+  }, 999);
+}
 
 
 /**

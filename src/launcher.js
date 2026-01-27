@@ -579,6 +579,8 @@ export async function launchWordPress() {
           WP_DEBUG_LOG: debugLogVfsPath, // Explicit absolute path in VFS that maps to our temp dir
           // Enable backtraces if WP_ENABLE_BACKTRACES env var is set
           WP_ENABLE_BACKTRACES: process.env.WP_ENABLE_BACKTRACES === '1',
+          // Enable script tracking if SCRIPT_TRACKING env var is set
+          WP_SCRIPT_TRACKING: process.env.SCRIPT_TRACKING === '1',
           // Disable automatic updates to avoid external requests
           AUTOMATIC_UPDATER_DISABLED: true,
           WP_AUTO_UPDATE_CORE: false,
@@ -648,7 +650,9 @@ file_put_contents($log_path, $header, FILE_APPEND | LOCK_EX);
 
     // Patch wp-includes/functions.wp-scripts.php to add a hook before _wp_scripts_maybe_doing_it_wrong()
     // This allows us to capture backtraces when wp_enqueue_script() is called
-    allSteps.push({
+    // Only do this if script tracking is enabled
+    if (process.env.SCRIPT_TRACKING === '1') {
+      allSteps.push({
       step: 'runPHP',
       code: `<?php
 // Patch wp-includes/functions.wp-scripts.php to add debugging hook
@@ -735,7 +739,8 @@ if (file_exists($file_path)) {
   }
 }
 `,
-    });
+      });
+    }
 
     // Add final step to generate discovery file synchronously
     // This ensures the discovery file exists before any tests run, allowing us to read it

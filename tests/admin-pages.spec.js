@@ -141,8 +141,8 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
             `Images: ${metrics.imageCount} (${formatBytes(metrics.imageSize)})`
           );
 
-          // Step 13: Log JS scripts for options-general.php (temp debugging)
-          if (pageItem.path === '/wp-admin/options-general.php') {
+          // Step 13: Log JS scripts for options-general.php (only when script tracking is enabled)
+          if (process.env.SCRIPT_TRACKING === '1') {
             const jsScripts = await getJavaScriptScripts(page, resourceTracking.resourceSizes);
             console.log(`\n[${pageItem.path}] Loaded JS Scripts (${jsScripts.length} total):`);
             jsScripts.forEach((script, index) => {
