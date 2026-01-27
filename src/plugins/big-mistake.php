@@ -593,6 +593,34 @@ add_filter('site_option_can_compress_scripts', 'big_mistake_filter_can_compress_
 add_filter('default_site_option_can_compress_scripts', 'big_mistake_filter_can_compress_scripts');
 
 /**
+ * Force crowdsignal_forms_do_activation_redirect option to always return false
+ * This prevents the Crowdsignal-forms plugin from redirecting on admin_init
+ */
+add_filter('option_crowdsignal_forms_do_activation_redirect', '__return_false');
+
+/**
+ * Log wp_redirect/wp_safe_redirect calls
+ */
+function big_mistake_log_redirect($location, $status) {
+  if (defined('WP_DEBUG_LOG') && WP_DEBUG_LOG) {
+    $request_uri = isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : 'unknown';
+
+    error_log(sprintf(
+      "wp_redirect: %s -> %s (status: %d)",
+      $request_uri,
+      $location,
+      $status
+    ));
+  }
+
+  // Return the location unchanged (don't modify the redirect)
+  return $location;
+}
+
+// The filter name is 'wp_redirect' - it catches both wp_redirect() and wp_safe_redirect() calls
+add_filter('wp_redirect', 'big_mistake_log_redirect', 10, 2);
+
+/**
  * Generate discovery data for E2E tests.
  * Returns an array with post types, list pages, admin menu items, and submenu items.
  */
