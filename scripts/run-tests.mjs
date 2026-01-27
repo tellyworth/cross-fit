@@ -101,6 +101,13 @@ async function main() {
     // Do not forward --debug to Playwright
   }
 
+  // Handle SCRIPT_TRACKING flag - enable script tracking for debugging
+  const hasScriptTrackingFlag = options['script-tracking'] || passthrough.includes('--script-tracking') || process.env.SCRIPT_TRACKING === '1';
+  if (hasScriptTrackingFlag) {
+    env.SCRIPT_TRACKING = '1';
+    // Do not forward --script-tracking to Playwright
+  }
+
   // Handle CAPTURE flag - map to Playwright's --update-snapshots
   // Check both options (--capture=value) and passthrough (--capture as flag) BEFORE filtering
   const hasCaptureFlag = options.capture || passthrough.includes('--capture') || process.env.CAPTURE === '1';
@@ -166,13 +173,14 @@ async function main() {
   }
 
   // Forward all other options to Playwright (e.g., --grep, --grep-invert, etc.)
-  // Filter out snapshot-related flags, upgrade-all, and debug from passthrough
+  // Filter out snapshot-related flags, upgrade-all, debug, and script-tracking from passthrough
   const forwardedArgs = passthrough.filter(arg =>
     arg !== '--capture' &&
     arg !== '--clear-snapshots' &&
     arg !== '--skip-snapshots' &&
     arg !== '--upgrade-all' &&
-    arg !== '--debug'
+    arg !== '--debug' &&
+    arg !== '--script-tracking'
   );
 
   if (hasCaptureFlag) {
@@ -192,7 +200,8 @@ async function main() {
           key !== 'full' && key !== 'fullMode' && key !== 'debug' &&
           key !== 'capture' && key !== 'clear-snapshots' && key !== 'clearSnapshots' &&
           key !== 'skip-snapshots' && key !== 'skipSnapshots' &&
-          key !== 'screenshot-threshold' && key !== 'screenshotThreshold' && key !== 'threshold') {
+          key !== 'screenshot-threshold' && key !== 'screenshotThreshold' && key !== 'threshold' &&
+          key !== 'script-tracking') {
         forwardedArgs.push(`--${key}=${value}`);
       }
   }

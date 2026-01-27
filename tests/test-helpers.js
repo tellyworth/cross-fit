@@ -1700,6 +1700,165 @@ export async function compareScreenshotPublic(page, path, pageContent, allowPHPE
 }
 
 /**
+ * Set up resource tracking using Playwright's response events
+ * This captures actual response sizes including cached resources
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @returns {Object} Tracking object with resources map and cleanup function
+ */
+export function setupResourceTracking(page) {
+  const resourceSizes = new Map(); // URL -> size in bytes
+
+  const responseListener = async (response) => {
+    const url = response.url();
+    try {
+      // Try to get size from Content-Length header first
+      const contentLength = response.headers()['content-length'];
+      if (contentLength) {
+        resourceSizes.set(url, parseInt(contentLength, 10));
+        return;
+      }
+
+      // Fallback: get size from response body
+      try {
+        const body = await response.body();
+        if (body) {
+          resourceSizes.set(url, body.length);
+        }
+      } catch (e) {
+        // Some responses can't be read (e.g., streaming), ignore
+      }
+    } catch (e) {
+      // Ignore errors
+    }
+  };
+
+  page.on('response', responseListener);
+
+  return {
+    resourceSizes,
+    cleanup: () => {
+      page.off('response', responseListener);
+    },
+  };
+}
+
+/**
+ * Get list of JavaScript scripts loaded on the page
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @param {Map} resourceSizes - Optional map of URL -> size from response tracking
+ * @returns {Promise<Array>} Array of script objects with url, size, and type
+ */
+export async function getJavaScriptScripts(page, resourceSizes = null) {
+  return await page.evaluate((trackedSizes) => {
+    const resources = performance.getEntriesByType('resource');
+
+    // Helper to get size
+    const getSize = (entry, url) => {
+      if (trackedSizes && trackedSizes[url]) {
+        return trackedSizes[url];
+      }
+      if (entry.transferSize && entry.transferSize > 0) {
+        return entry.transferSize;
+      }
+      if (entry.encodedBodySize && entry.encodedBodySize > 0) {
+        return entry.encodedBodySize;
+      }
+      if (entry.decodedBodySize && entry.decodedBodySize > 0) {
+        return entry.decodedBodySize;
+      }
+      return 0;
+    };
+
+    const jsResources = resources.filter(r =>
+      r.name.endsWith('.js') || r.initiatorType === 'script'
+    );
+
+    return jsResources.map(r => ({
+      url: r.name,
+      size: getSize(r, r.name),
+      initiatorType: r.initiatorType,
+      duration: r.duration,
+    })).sort((a, b) => b.size - a.size); // Sort by size descending
+  }, resourceSizes ? Object.fromEntries(resourceSizes) : null);
+}
+
+/**
+ * Get resource metrics using the browser's Performance API
+ * Combines with Playwright response tracking for more accurate sizes
+ * Returns total page size, JS/CSS/image counts and sizes
+ * @param {import('@playwright/test').Page} page - Playwright page object
+ * @param {Map} resourceSizes - Optional map of URL -> size from response tracking
+ * @returns {Promise<Object>} Resource metrics object
+ */
+export async function getResourceMetrics(page, resourceSizes = null) {
+  return await page.evaluate((trackedSizes) => {
+    const navigation = performance.getEntriesByType('navigation')[0];
+    const resources = performance.getEntriesByType('resource');
+
+    // Helper to get size: try multiple fallbacks for cached resources
+    const getSize = (entry, url) => {
+      // First, check if we have tracked size from Playwright (most accurate)
+      if (trackedSizes && trackedSizes[url]) {
+        return trackedSizes[url];
+      }
+
+      // Prefer transferSize (actual bytes transferred, including compression)
+      if (entry.transferSize && entry.transferSize > 0) {
+        return entry.transferSize;
+      }
+      // For cached resources, try encodedBodySize (compressed size)
+      if (entry.encodedBodySize && entry.encodedBodySize > 0) {
+        return entry.encodedBodySize;
+      }
+      // Last resort: decodedBodySize (uncompressed size) - less accurate but better than 0
+      if (entry.decodedBodySize && entry.decodedBodySize > 0) {
+        return entry.decodedBodySize;
+      }
+      return 0;
+    };
+
+    const jsResources = resources.filter(r =>
+      r.name.endsWith('.js') || r.initiatorType === 'script'
+    );
+    const cssResources = resources.filter(r =>
+      r.name.endsWith('.css') || r.initiatorType === 'css' || r.initiatorType === 'link'
+    );
+    const imageResources = resources.filter(r =>
+      r.initiatorType === 'img' ||
+      /\.(jpg|jpeg|png|gif|webp|svg|ico)$/i.test(r.name)
+    );
+
+    // Also count CSS link tags in the DOM (for cases where Performance API doesn't capture them)
+    const cssLinkTags = document.querySelectorAll('link[rel="stylesheet"]');
+    const cssLinkCount = cssLinkTags.length;
+
+    // Calculate sizes
+    const jsSize = jsResources.reduce((sum, r) => sum + getSize(r, r.name), 0);
+    const cssSize = cssResources.reduce((sum, r) => sum + getSize(r, r.name), 0);
+    const imageSize = imageResources.reduce((sum, r) => sum + getSize(r, r.name), 0);
+    const totalResourceSize = resources.reduce((sum, r) => sum + getSize(r, r.name), 0);
+    const navigationSize = getSize(navigation, navigation.name);
+
+    return {
+      // Total size (all resources including HTML)
+      totalSize: totalResourceSize + navigationSize,
+
+      // JavaScript metrics
+      jsCount: jsResources.length,
+      jsSize: jsSize,
+
+      // CSS metrics - use max of Performance API count and DOM link tag count
+      cssCount: Math.max(cssResources.length, cssLinkCount),
+      cssSize: cssSize,
+
+      // Image metrics
+      imageCount: imageResources.length,
+      imageSize: imageSize,
+    };
+  }, resourceSizes ? Object.fromEntries(resourceSizes) : null);
+}
+
+/**
  * Simple helper to navigate to an admin page and verify basic response
  * This is a lightweight function for tests that just need to load an admin page
  * without all the comprehensive validation steps.

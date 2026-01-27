@@ -1,6 +1,7 @@
 import { test, expect } from './wp-fixtures.js';
 import {
   setupErrorTracking,
+  setupResourceTracking,
   navigateToAdminPage,
   checkSamePage,
   waitForAdminUI,
@@ -15,6 +16,8 @@ import {
   normalizePath,
   loadDiscoveryDataSync,
   prepareAdminPagesToTest,
+  getResourceMetrics,
+  getJavaScriptScripts,
 } from './test-helpers.js';
 
 /**
@@ -84,8 +87,9 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
       test(`admin page: ${pageItem.title} (${pageItem.path})`, async ({ page, wpInstance }) => {
         const url = normalizePath(wpInstance.url, pageItem.path);
 
-        // Step 1: Set up error tracking
+        // Step 1: Set up error tracking and resource tracking
         const errorTracking = setupErrorTracking(page);
+        const resourceTracking = setupResourceTracking(page);
 
         try {
           // Step 2: Navigate to admin page (checks status internally, asserts no redirect)
@@ -126,9 +130,29 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
 
           // Step 11: Compare screenshot if needed
           await compareScreenshotIfNeeded(page, pageItem.path, pageContent);
+
+          // Step 12: Log resource metrics
+          const metrics = await getResourceMetrics(page, resourceTracking.resourceSizes);
+          const formatBytes = (bytes) => (bytes / 1024).toFixed(1) + 'KB';
+          console.log(
+            `[${pageItem.path}] Total: ${formatBytes(metrics.totalSize)} | ` +
+            `JS: ${metrics.jsCount} (${formatBytes(metrics.jsSize)}) | ` +
+            `CSS: ${metrics.cssCount} (${formatBytes(metrics.cssSize)}) | ` +
+            `Images: ${metrics.imageCount} (${formatBytes(metrics.imageSize)})`
+          );
+
+          // Step 13: Log JS scripts for options-general.php (only when script tracking is enabled)
+          if (process.env.SCRIPT_TRACKING === '1') {
+            const jsScripts = await getJavaScriptScripts(page, resourceTracking.resourceSizes);
+            console.log(`\n[${pageItem.path}] Loaded JS Scripts (${jsScripts.length} total):`);
+            jsScripts.forEach((script, index) => {
+              console.log(`  ${index + 1}. ${formatBytes(script.size)} - ${script.url} (${script.initiatorType})`);
+            });
+          }
         } finally {
-          // Cleanup error tracking listeners
+          // Cleanup error tracking and resource tracking listeners
           errorTracking.cleanup();
+          resourceTracking.cleanup();
         }
       });
     });
