@@ -132,17 +132,17 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
           await compareScreenshotIfNeeded(page, pageItem.path, pageContent);
 
           // Step 12: Log resource metrics
-          const metrics = await getResourceMetrics(page, resourceTracking.resourceSizes);
-          const formatBytes = (bytes) => (bytes / 1024).toFixed(1) + 'KB';
-          console.log(
-            `[${pageItem.path}] Total: ${formatBytes(metrics.totalSize)} | ` +
-            `JS: ${metrics.jsCount} (${formatBytes(metrics.jsSize)}) | ` +
-            `CSS: ${metrics.cssCount} (${formatBytes(metrics.cssSize)}) | ` +
-            `Images: ${metrics.imageCount} (${formatBytes(metrics.imageSize)})`
-          );
+          if (resourceTracking && process.env.SCRIPT_TRACKING === '1') {
+            const metrics = await getResourceMetrics(page, resourceTracking.resourceSizes);
+            const formatBytes = (bytes) => (bytes / 1024).toFixed(1) + 'KB';
+            console.log(
+              `[${pageItem.path}] Total: ${formatBytes(metrics.totalSize)} | ` +
+              `JS: ${metrics.jsCount} (${formatBytes(metrics.jsSize)}) | ` +
+              `CSS: ${metrics.cssCount} (${formatBytes(metrics.cssSize)}) | ` +
+              `Images: ${metrics.imageCount} (${formatBytes(metrics.imageSize)})`
+            );
 
-          // Step 13: Log JS scripts for options-general.php (only when script tracking is enabled)
-          if (process.env.SCRIPT_TRACKING === '1') {
+          // Step 13: Log JS scripts
             const jsScripts = await getJavaScriptScripts(page, resourceTracking.resourceSizes);
             console.log(`\n[${pageItem.path}] Loaded JS Scripts (${jsScripts.length} total):`);
             jsScripts.forEach((script, index) => {
