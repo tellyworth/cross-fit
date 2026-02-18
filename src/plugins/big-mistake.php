@@ -106,30 +106,6 @@ function big_mistake_trigger_visual_diff() {
 add_action('init', 'big_mistake_trigger_visual_diff', 1);
 
 /**
- * Trigger an HTTP request during page rendering for testing
- * This allows us to verify HTTP timeout errors appear in page content
- */
-function big_mistake_test_http_request() {
-  // Check for trigger via GET parameter
-  $test_http = isset($_GET['test_http_timeout']) || isset($_SERVER['HTTP_X_TEST_HTTP_TIMEOUT']);
-
-  if ($test_http) {
-    // Make an external HTTP request that will timeout (httpbin.org is allowed in pre_http_request)
-    // Short timeout so it fails quickly and triggers http_api_debug for the timeout test
-    $response = wp_remote_get('https://httpbin.org/delay/1', array(
-      'timeout' => 0.1,
-      'connect_timeout' => 0.1,
-    ));
-
-    // The http_api_debug action will trigger an error if timeout occurs
-    // We don't need to do anything else here - the action handles it
-  }
-}
-
-add_action('wp_head', 'big_mistake_test_http_request', 1);
-
-
-/**
  * Disable dashboard widgets that fetch external RSS feeds
  * This prevents slow server-side timeouts when fetching wordpress.org feeds
  */
@@ -358,8 +334,7 @@ add_action('http_api_debug', function($response, $context, $class, $args, $url) 
 
 /**
  * Block all external HTTP requests during tests so we fail fast instead of waiting for timeouts.
- * Self-requests are blocked to avoid protocol mismatches (HTTPS client, HTTP server).
- * Only the site host and the timeout-test host (httpbin.org) are allowed.
+ * Only the site host (same host / localhost) is allowed.
  */
 function big_mistake_block_problematic_requests($preempt, $args, $url) {
   $host = parse_url($url, PHP_URL_HOST);
@@ -371,11 +346,6 @@ function big_mistake_block_problematic_requests($preempt, $args, $url) {
 
   // Allow requests to the site itself (same host / localhost)
   if ($host === $site_host || $host === '127.0.0.1' || $host === 'localhost') {
-    return $preempt;
-  }
-
-  // Allow httpbin.org only for the intentional HTTP timeout test (big_mistake_test_http_request)
-  if (preg_match('/(^|\\.)httpbin\\.org$/i', $host)) {
     return $preempt;
   }
 
