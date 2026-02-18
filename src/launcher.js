@@ -104,6 +104,56 @@ async function mapPluginNamesToSlugs(plugins) {
 }
 
 /**
+ * Query WordPress.org plugins update-check API for latest version of each slug.
+ * Same API as mapPluginNamesToSlugs; one request for all plugins. Response gives
+ * new_version (when update available) or version (in no_update).
+ * @param {string[]} slugs - Plugin slugs (e.g. ['akismet', 'hello-dolly'])
+ * @returns {Promise<Map<string, string>>} Map of slug to latest version string
+ */
+async function queryPluginVersionsViaUpdateCheck(slugs) {
+  const slugToVersion = new Map();
+  if (!slugs?.length) return slugToVersion;
+
+  try {
+    const pluginsData = {};
+    const activePlugins = [];
+    slugs.forEach((slug) => {
+      const path = `${slug}/${slug}.php`;
+      pluginsData[path] = { Name: slug, Version: '0.0.0' };
+      activePlugins.push(path);
+    });
+
+    const formData = new URLSearchParams();
+    formData.append('plugins', JSON.stringify({ plugins: pluginsData, active: activePlugins }));
+    formData.append('translations', JSON.stringify([]));
+    formData.append('locale', JSON.stringify(['en_US']));
+    formData.append('all', 'true');
+
+    const response = await fetch('https://api.wordpress.org/plugins/update-check/1.1/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'cross-fit/1.0' },
+      body: formData.toString(),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const allPlugins = { ...(data.plugins || {}), ...(data.no_update || {}) };
+      activePlugins.forEach((path) => {
+        const pluginInfo = allPlugins[path];
+        const version = pluginInfo?.new_version ?? pluginInfo?.version;
+        if (version) {
+          const slug = path.replace(/\/[^/]+\.php$/, '');
+          slugToVersion.set(slug, version);
+        }
+      });
+    }
+  } catch (error) {
+    console.warn('Warning: Could not query WordPress.org plugins update-check API for versions:', error.message);
+  }
+  return slugToVersion;
+}
+
+/**
  * Parse WordPress Site Health data from a text file
  * @param {string} filePath - Path to the site health text file
  * @returns {Promise<Object|null>} Parsed site health data or null if file cannot be read
@@ -320,6 +370,60 @@ function extractBlueprintArgFromProcess() {
   const argvArg = (process.argv || []).find(a => a.startsWith('--blueprint='));
   if (argvArg) return argvArg.split('=')[1];
   return null;
+}
+
+const WP_ORG_API_TIMEOUT_MS = 10000;
+
+/** Fetch latest WordPress version from api.wordpress.org */
+async function fetchLatestWpVersion() {
+  try {
+    const c = new AbortController();
+    const t = setTimeout(() => c.abort(), WP_ORG_API_TIMEOUT_MS);
+    const res = await fetch('https://api.wordpress.org/core/version-check/1.7/?locale=en_US', { signal: c.signal });
+    clearTimeout(t);
+    const data = await res.json();
+    return data?.offers?.[0]?.version ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Fetch latest theme version by slug from api.wordpress.org */
+async function fetchLatestThemeVersion(slug) {
+  try {
+    const c = new AbortController();
+    const t = setTimeout(() => c.abort(), WP_ORG_API_TIMEOUT_MS);
+    const url = `https://api.wordpress.org/themes/info/1.2/?action=theme_information&request[slug]=${encodeURIComponent(slug)}&request[fields][version]=1`;
+    const res = await fetch(url, { signal: c.signal });
+    clearTimeout(t);
+    const data = await res.json();
+    return data?.version ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve "latest" to actual versions for upgrade-all logging.
+ * @returns {Promise<{ wpVersion: string|null, themeVersion: string|null, pluginVersions: Map<string, string> }>}
+ */
+async function resolveLatestVersionsForLogging(upgradeAll, wpVersion, siteHealthData) {
+  const out = { wpVersion: null, themeVersion: null, pluginVersions: new Map() };
+  if (!upgradeAll) return out;
+
+  if (wpVersion === 'latest') {
+    out.wpVersion = await fetchLatestWpVersion();
+  }
+  if (siteHealthData?.theme) {
+    const themeSlug = siteHealthData.theme.includes('@') ? siteHealthData.theme.split('@')[0] : siteHealthData.theme;
+    out.themeVersion = await fetchLatestThemeVersion(themeSlug);
+  }
+  if (siteHealthData?.plugins?.length) {
+    const slugs = siteHealthData.plugins.map(p => (p.includes('@') ? p.split('@')[0] : p));
+    const versionMap = await queryPluginVersionsViaUpdateCheck(slugs);
+    versionMap.forEach((ver, slug) => out.pluginVersions.set(slug, ver));
+  }
+  return out;
 }
 
 /**
@@ -779,6 +883,9 @@ if (function_exists('big_mistake_write_discovery_file')) {
     // We do not upgrade PHP in upgrade-all mode to avoid compatibility issues (e.g. PHP 8.5 deprecations in Playground)
     const phpVersion = (siteHealthData && siteHealthData.phpVersion) ? siteHealthData.phpVersion : '8.3';
 
+    // Resolve "latest" to actual versions for upgrade-all so we can log them
+    const resolvedVersions = await resolveLatestVersionsForLogging(upgradeAll, wpVersion, siteHealthData);
+
     // Mount our temp directory to /wordpress before installation
     // This ensures WordPress files (including debug.log) are stored in our known directory
     cliServer = await runCLI({
@@ -799,25 +906,33 @@ if (function_exists('big_mistake_write_discovery_file')) {
 
     console.log('✓ Enabled WP_DEBUG, WP_DEBUG_DISPLAY, and WP_DEBUG_LOG via blueprint');
 
-    // Log WordPress version
+    // Log WordPress version (show resolved version when upgrade-all)
     if (process.env.WP_WP_VERSION) {
-      console.log(`✓ Will use WordPress version: ${process.env.WP_WP_VERSION}`);
+      const wpDisplay = (upgradeAll && wpVersion === 'latest' && resolvedVersions.wpVersion)
+        ? resolvedVersions.wpVersion
+        : process.env.WP_WP_VERSION;
+      console.log(`✓ Will use WordPress version: ${wpDisplay}`);
     }
 
     // Log PHP version
     console.log(`✓ Will use PHP version: ${phpVersion}`);
 
-    // Log site health configuration
+    // Log site health configuration (show resolved versions when upgrade-all)
     if (siteHealthData) {
       if (siteHealthData.theme) {
-        const themeDisplay = upgradeAll && siteHealthData.theme.includes('@')
-          ? `${siteHealthData.theme.split('@')[0]} (latest, upgrade-all)`
+        const themeSlug = siteHealthData.theme.includes('@') ? siteHealthData.theme.split('@')[0] : siteHealthData.theme;
+        const themeDisplay = upgradeAll && resolvedVersions.themeVersion
+          ? `${themeSlug}@${resolvedVersions.themeVersion}`
           : siteHealthData.theme;
         console.log(`✓ Will install and activate theme from site health: ${themeDisplay}`);
       }
       if (siteHealthData.plugins.length > 0) {
         const pluginsDisplay = upgradeAll
-          ? siteHealthData.plugins.map(p => p.includes('@') ? `${p.split('@')[0]} (latest)` : p).join(', ')
+          ? siteHealthData.plugins.map(p => {
+              const slug = p.includes('@') ? p.split('@')[0] : p;
+              const ver = resolvedVersions.pluginVersions.get(slug);
+              return ver ? `${slug}@${ver}` : `${slug} (latest)`;
+            }).join(', ')
           : siteHealthData.plugins.join(', ');
         console.log(`✓ Will install and activate plugins from site health: ${pluginsDisplay}`);
       }
