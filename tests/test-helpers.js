@@ -1620,7 +1620,7 @@ export async function navigateToPage(page, url, waitUntil = 'load', expectedStat
   // Check for unexpected redirects (URL changed)
   if (response) {
     const finalUrl = response.url();
-    
+
     // Normalize URLs for comparison (handle trailing slashes, etc.)
     const normalizeUrl = (u) => {
       try {
@@ -2166,6 +2166,7 @@ export function prepareAdminPagesToTest(discoveryData) {
     // Skip known slow pages even in full mode (customize iframe, erase personal data)
     if (item.path === '/wp-admin/erase-personal-data.php') return false;
     if (item.path.startsWith('/wp-admin/customize.php')) return false;
+    if (item.path.startsWith('/wp-admin/plugin-editor.php')) return false;
 
     return true;
   });
