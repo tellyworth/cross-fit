@@ -2161,7 +2161,13 @@ export function prepareAdminPagesToTest(discoveryData) {
       '/wp-admin/plugin-install.php',
       '/wp-admin/update-core.php',
     ];
-    return !apiErrorPaths.includes(item.path);
+    if (apiErrorPaths.includes(item.path)) return false;
+
+    // Skip known slow pages even in full mode (customize iframe, erase personal data)
+    if (item.path === '/wp-admin/erase-personal-data.php') return false;
+    if (item.path.startsWith('/wp-admin/customize.php')) return false;
+
+    return true;
   });
 }
 
