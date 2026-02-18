@@ -1081,9 +1081,47 @@ function big_mistake_discover_admin_submenu_items() {
         continue;
       }
 
+      // Skip menu slugs that are already full URLs (some plugins incorrectly register full URLs)
+      // These will cause issues when trying to construct admin URLs
+      if (preg_match('#^https?://#i', $menu_slug)) {
+        continue;
+      }
+
       // Extract title text (may contain HTML)
       $title_text = wp_strip_all_tags($menu_title);
-      $admin_url  = admin_url($menu_slug);
+      
+      // Check if the menu slug contains a query string (indicates it's a complete path)
+      $has_query_string = strpos($menu_slug, '?') !== false;
+      
+      // If the slug contains a query string, it's a complete path - use admin_url() directly
+      // This handles cases like "edit-tags.php?taxonomy=category" correctly
+      if ($has_query_string) {
+        $admin_url = admin_url($menu_slug);
+      } else {
+        // No query string - check if it's a PHP file
+        $is_php_file = substr($menu_slug, -4) === '.php';
+        
+        if ($is_php_file) {
+          // It's a PHP file without query string, use admin_url() directly
+          $admin_url = admin_url($menu_slug);
+        } else {
+          // Not a PHP file, use menu_page_url() to get the correct URL for registered menu pages
+          $admin_url = menu_page_url($menu_slug, false);
+          
+          // Fallback: if menu_page_url() returns false/empty, construct URL manually
+          if (empty($admin_url)) {
+            // Check parent to see if we should use parent's base URL
+            $parent_base = strpos($parent_slug, '?') !== false ? substr($parent_slug, 0, strpos($parent_slug, '?')) : $parent_slug;
+            if (substr($parent_base, -4) === '.php') {
+              // Parent is a PHP file, append ?page=slug
+              $admin_url = admin_url($parent_slug . '?page=' . urlencode($menu_slug));
+            } else {
+              // Parent is also a menu slug, use admin.php?page=slug
+              $admin_url = admin_url('admin.php?page=' . urlencode($menu_slug));
+            }
+          }
+        }
+      }
 
       $submenu_items[] = array(
         'parent' => $parent_slug,
