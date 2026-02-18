@@ -85,6 +85,9 @@ test.describe('WordPress Admin Pages', { tag: '@admin' }, () => {
     // Reference: https://playwright.dev/docs/test-parameterize
     adminPagesToTest.forEach((pageItem) => {
       test(`admin page: ${pageItem.title} (${pageItem.path})`, async ({ page, wpInstance }) => {
+        // Heavy admin pages (block editor, options, plugin UIs) often need more than default 20s
+        test.setTimeout(35000);
+
         const url = normalizePath(wpInstance.url, pageItem.path);
 
         // Step 1: Set up error tracking and resource tracking
