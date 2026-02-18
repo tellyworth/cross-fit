@@ -776,13 +776,8 @@ if (function_exists('big_mistake_write_discovery_file')) {
     const wpVersion = process.env.WP_WP_VERSION || 'latest';
 
     // Get PHP version from site health data or default to '8.3'
-    // If upgrade-all is enabled, use 'latest' for PHP version
-    let phpVersion = '8.3';
-    if (upgradeAll) {
-      phpVersion = 'latest';
-    } else if (siteHealthData && siteHealthData.phpVersion) {
-      phpVersion = siteHealthData.phpVersion;
-    }
+    // We do not upgrade PHP in upgrade-all mode to avoid compatibility issues (e.g. PHP 8.5 deprecations in Playground)
+    const phpVersion = (siteHealthData && siteHealthData.phpVersion) ? siteHealthData.phpVersion : '8.3';
 
     // Mount our temp directory to /wordpress before installation
     // This ensures WordPress files (including debug.log) are stored in our known directory
@@ -810,11 +805,7 @@ if (function_exists('big_mistake_write_discovery_file')) {
     }
 
     // Log PHP version
-    if (upgradeAll) {
-      console.log(`✓ Will use PHP version: latest (upgrade-all mode)`);
-    } else if (siteHealthData && siteHealthData.phpVersion) {
-      console.log(`✓ Will use PHP version: ${siteHealthData.phpVersion}`);
-    }
+    console.log(`✓ Will use PHP version: ${phpVersion}`);
 
     // Log site health configuration
     if (siteHealthData) {
