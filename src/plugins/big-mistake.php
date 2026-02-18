@@ -114,9 +114,8 @@ function big_mistake_test_http_request() {
   $test_http = isset($_GET['test_http_timeout']) || isset($_SERVER['HTTP_X_TEST_HTTP_TIMEOUT']);
 
   if ($test_http) {
-    // Make an external HTTP request that will timeout with our 0.1s timeout
-    // Use a URL that isn't blocked by pre_http_request filter (not api.wordpress.org)
-    // This happens during page rendering, so errors will appear in page content
+    // Make an external HTTP request that will timeout (httpbin.org is allowed in pre_http_request)
+    // Short timeout so it fails quickly and triggers http_api_debug for the timeout test
     $response = wp_remote_get('https://httpbin.org/delay/1', array(
       'timeout' => 0.1,
       'connect_timeout' => 0.1,
@@ -149,25 +148,6 @@ function big_mistake_disable_external_feeds() {
 }
 
 add_action('wp_dashboard_setup', 'big_mistake_disable_external_feeds', 999);
-
-/**
- * Reduce HTTP timeouts for external requests to fail fast
- * When requests timeout, they will trigger PHP errors
- */
-function big_mistake_reduce_http_timeout($args, $url) {
-  $site_host = parse_url(get_site_url(), PHP_URL_HOST);
-  $request_host = parse_url($url, PHP_URL_HOST);
-
-  if ($request_host && $request_host !== $site_host) {
-    $args['timeout'] = 0.1;
-    $args['connect_timeout'] = 0.1;
-  }
-
-  return $args;
-}
-
-add_filter('http_request_args', 'big_mistake_reduce_http_timeout', 999, 2);
-
 
 /**
  * Get a trimmed backtrace with big-mistake frames removed from the top
@@ -377,8 +357,9 @@ add_action('http_api_debug', function($response, $context, $class, $args, $url) 
 }, 10, 5);
 
 /**
- * Hard-block requests to api.wordpress.org and self-requests to avoid slow update checks and protocol mismatches
- * Self-requests can cause HPE_INVALID_METHOD errors when WordPress tries HTTPS on an HTTP server
+ * Block all external HTTP requests during tests so we fail fast instead of waiting for timeouts.
+ * Self-requests are blocked to avoid protocol mismatches (HTTPS client, HTTP server).
+ * Only the site host and the timeout-test host (httpbin.org) are allowed.
  */
 function big_mistake_block_problematic_requests($preempt, $args, $url) {
   $host = parse_url($url, PHP_URL_HOST);
@@ -386,21 +367,20 @@ function big_mistake_block_problematic_requests($preempt, $args, $url) {
     return $preempt;
   }
 
-  // Block api.wordpress.org requests
-  if (preg_match('/(^|\\.)api\\.wordpress\\.org$/i', $host)) {
-    return new WP_Error('blocked_api_wordpress_org', 'Blocked api.wordpress.org during tests');
-  }
-
-  // Block self-requests (WordPress making HTTP requests to itself)
-  // This prevents HPE_INVALID_METHOD errors from protocol mismatches (HTTPS client, HTTP server)
   $site_host = parse_url(get_site_url(), PHP_URL_HOST);
 
-  // Match host (ignore port differences - localhost requests are problematic regardless)
+  // Allow requests to the site itself (same host / localhost)
   if ($host === $site_host || $host === '127.0.0.1' || $host === 'localhost') {
-    return new WP_Error('blocked_self_request', 'Blocked self-request during tests to prevent protocol mismatches');
+    return $preempt;
   }
 
-  return $preempt;
+  // Allow httpbin.org only for the intentional HTTP timeout test (big_mistake_test_http_request)
+  if (preg_match('/(^|\\.)httpbin\\.org$/i', $host)) {
+    return $preempt;
+  }
+
+  // Block everything else (all other external hosts)
+  return new WP_Error('blocked_external_request', 'Blocked external HTTP request during tests: ' . $host);
 }
 
 add_filter('pre_http_request', 'big_mistake_block_problematic_requests', 999, 3);
