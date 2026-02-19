@@ -2,7 +2,6 @@ import { expect } from '@playwright/test';
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import os from 'os';
 import playwrightConfig from '../playwright.config.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -48,18 +47,11 @@ function pathToSnapshotName(path) {
 
 /**
  * Get the full path to a snapshot file
- * Playwright uses snapshotPathTemplate: 'test-snapshots/{arg}{ext}'
- * Playwright automatically adds platform suffix (e.g., -darwin, -win32, -linux) to snapshot names
- * So we need to check for the platform-specific filename
+ * Our config uses snapshotPathTemplate: 'test-snapshots/{arg}{ext}' with no {platform},
+ * so snapshots are stored as the plain name (e.g. wp-admin-edit.png).
  */
 function getSnapshotPath(snapshotName) {
-  // Remove .png extension if present
-  const baseName = snapshotName.replace(/\.png$/, '');
-  // Get platform suffix (Playwright uses darwin, win32, or linux)
-  const platform = os.platform() === 'darwin' ? 'darwin' : os.platform() === 'win32' ? 'win32' : 'linux';
-  // Construct the platform-specific filename
-  const platformSpecificName = `${baseName}-${platform}.png`;
-  return join(__dirname, '..', 'test-snapshots', platformSpecificName);
+  return join(__dirname, '..', 'test-snapshots', snapshotName);
 }
 
 /**
@@ -71,7 +63,8 @@ async function compareScreenshot(page, path, snapshotName, options = {}) {
 
   // Only compare if snapshot exists OR if in capture mode (to create it)
   if (!existsSync(snapshotPath) && !isCaptureMode) {
-    return; // No snapshot exists and not capturing - skip silently
+    console.warn(`[Baseline] No snapshot for ${path} - skipping comparison`);
+    return;
   }
 
   // Wait for page to stabilize before taking screenshot (admin pages only)
