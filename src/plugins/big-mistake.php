@@ -333,8 +333,70 @@ add_action('http_api_debug', function($response, $context, $class, $args, $url) 
 }, 10, 5);
 
 /**
+ * Get a short "caller" description for the code that triggered an HTTP request.
+ * Used when logging blocked requests in debug mode.
+ * - If the call came from a plugin/theme (non-core), returns that file:line.
+ * - If the call came from core, finds the frame that called wp_remote_get/post/request and returns that file:line and function.
+ *
+ * @return string e.g. "wp-content/plugins/akismet/akismet.php:123" or "wp-admin/includes/dashboard.php:29 (wp_check_browser_version())"
+ */
+function big_mistake_get_http_request_caller() {
+  $backtrace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 25);
+  $abspath = defined('ABSPATH') ? ABSPATH : '';
+  $wpinc = defined('WPINC') ? WPINC : 'wp-includes';
+  $http_functions = array('wp_remote_get', 'wp_remote_post', 'wp_remote_request', 'wp_remote_head');
+
+  $format_frame = function ($frame) use ($abspath) {
+    if (!isset($frame['file'])) {
+      return null;
+    }
+    $file = $frame['file'];
+    if ($abspath && strpos($file, $abspath) === 0) {
+      $file = substr($file, strlen($abspath));
+    }
+    $line = isset($frame['line']) ? $frame['line'] : '?';
+    $func = isset($frame['function']) ? $frame['function'] : '';
+    if ($func) {
+      return $file . ':' . $line . ' (' . $func . '())';
+    }
+    return $file . ':' . $line;
+  };
+
+  foreach ($backtrace as $i => $frame) {
+    if (!isset($frame['file'])) {
+      continue;
+    }
+    $file = $frame['file'];
+    if (strpos($file, __FILE__) !== false) {
+      continue;
+    }
+    // Plugin/theme (non-core): return this frame
+    if (strpos($file, $wpinc) === false && strpos($file, 'wp-admin') === false) {
+      $out = $format_frame($frame);
+      if ($out) {
+        return $out;
+      }
+      continue;
+    }
+    // Core: find the frame where we're inside wp_remote_*; report call site (file:line) and caller function
+    if (isset($frame['function']) && in_array($frame['function'], $http_functions, true)) {
+      $file = $frame['file'];
+      if ($abspath && strpos($file, $abspath) === 0) {
+        $file = substr($file, strlen($abspath));
+      }
+      $line = isset($frame['line']) ? $frame['line'] : '?';
+      $caller_func = isset($backtrace[$i + 1]['function']) ? $backtrace[$i + 1]['function'] . '()' : '';
+      $call_site = $file . ':' . $line;
+      return $caller_func ? $call_site . ' (' . $caller_func . ')' : $call_site;
+    }
+  }
+  return 'unknown';
+}
+
+/**
  * Block all external HTTP requests during tests so we fail fast instead of waiting for timeouts.
  * Only the site host (same host / localhost) is allowed.
+ * Blocked requests are logged to debug.log; in --debug mode backtrace and caller are included.
  */
 function big_mistake_block_problematic_requests($preempt, $args, $url) {
   $host = parse_url($url, PHP_URL_HOST);
@@ -347,6 +409,18 @@ function big_mistake_block_problematic_requests($preempt, $args, $url) {
   // Allow requests to the site itself (same host / localhost)
   if ($host === $site_host || $host === '127.0.0.1' || $host === 'localhost') {
     return $preempt;
+  }
+
+  // Log to debug.log when blocking (so test runs can inspect who tried to call out)
+  if (defined('WP_DEBUG') && WP_DEBUG && defined('WP_DEBUG_LOG') && WP_DEBUG_LOG) {
+    $log_message = 'Blocked external HTTP request: ' . $host . ' (' . $url . ')';
+    $caller = big_mistake_get_http_request_caller();
+    $log_message .= "\n  Caller: " . $caller;
+    if (defined('WP_ENABLE_BACKTRACES') && WP_ENABLE_BACKTRACES) {
+
+      $log_message .= "\nBacktrace:\n" . big_mistake_get_trimmed_backtrace(null, 12);
+    }
+    error_log($log_message);
   }
 
   // Block everything else (all other external hosts)
